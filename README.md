@@ -36,11 +36,9 @@ OpenEnv environment for restaurant order fulfillment with inventory quantities, 
 
 `KitchenObservation` exposes:
 
-- `service_board`
-- `inventory`
-- `prepared_components`
+- `briefing`
 - `available_actions`
-- `kpis`
+- `metadata.last_action_error`
 
 ## Reward / Grading
 
@@ -60,7 +58,7 @@ uv sync --managed-python --python 3.11 --extra dev
 Run the server:
 
 ```bash
-uv run --managed-python --python 3.11 python -m uvicorn kitchen_ops_env.server.app:app --host 0.0.0.0 --port 8000
+uv run --managed-python --python 3.11 python -m uvicorn server.app:app --host 0.0.0.0 --port 8000
 ```
 
 Run tests:
@@ -78,15 +76,12 @@ export HF_TOKEN=...
 uv run --managed-python --python 3.11 python inference.py
 ```
 
-`inference.py` is deterministic by default. Set `USE_LLM_BASELINE=1` to let the script ask the configured model to break ties among top heuristic actions.
-
 ## Environment Variables
 
 - `API_BASE_URL`
 - `MODEL_NAME`
 - `HF_TOKEN`
 - `KITCHEN_ENV_URL` optional, defaults to `http://localhost:8000`
-- `USE_LLM_BASELINE` optional, defaults to `0`
 
 ## API
 

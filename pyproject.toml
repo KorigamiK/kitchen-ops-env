@@ -24,7 +24,6 @@ dev = [
 
 [project.scripts]
 server = "server.app:main"
-kitchen-ops-server = "kitchen_ops_env.server.app:main"
 
 [tool.hatch.build]
 include = [
