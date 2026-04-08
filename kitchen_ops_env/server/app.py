@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from openenv.core.env_server.http_server import create_app
 
 from ..models import KitchenAction, KitchenObservation
@@ -28,7 +30,9 @@ def create_kitchen_app() -> FastAPI:
     )
 
     @app.get("/", response_class=HTMLResponse)
-    def landing_page() -> HTMLResponse:
+    def landing_page() -> HTMLResponse | RedirectResponse:
+        if os.getenv("ENABLE_WEB_INTERFACE", "false").lower() in ("true", "1", "yes"):
+            return RedirectResponse(url="/web/")
         env = get_env()
         scenario = SCENARIOS[env.state.scenario_id]
         items = "".join(
@@ -96,4 +100,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
