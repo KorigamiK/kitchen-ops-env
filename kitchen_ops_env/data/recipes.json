@@ -1,0 +1,264 @@
+{
+  "masala_omelette": {
+    "display_name": "Masala omelette",
+    "sell_price": 11.0,
+    "components": [
+      {
+        "component_id": "omelette_base",
+        "display_name": "Whisked egg base",
+        "ingredients": [
+          {
+            "ingredient_id": "egg",
+            "quantity": 2.0,
+            "operation": "whisk"
+          }
+        ]
+      },
+      {
+        "component_id": "omelette_veg_mix",
+        "display_name": "Diced vegetable mix",
+        "ingredients": [
+          {
+            "ingredient_id": "onion",
+            "quantity": 40.0,
+            "operation": "dice"
+          },
+          {
+            "ingredient_id": "tomato",
+            "quantity": 40.0,
+            "operation": "dice"
+          },
+          {
+            "ingredient_id": "cilantro",
+            "quantity": 5.0,
+            "operation": "chop"
+          }
+        ]
+      }
+    ],
+    "cook_step": {
+      "operation": "griddle_omelette",
+      "station": "griddle",
+      "ingredients": [
+        {
+          "ingredient_id": "oil",
+          "quantity": 10.0,
+          "operation": "measure"
+        }
+      ]
+    },
+    "assemble_step": {
+      "operation": "plate_breakfast"
+    }
+  },
+  "paneer_wrap": {
+    "display_name": "Paneer wrap",
+    "sell_price": 14.0,
+    "components": [
+      {
+        "component_id": "protein_strip",
+        "display_name": "Sliced protein",
+        "ingredients": [
+          {
+            "ingredient_id": "paneer",
+            "quantity": 120.0,
+            "operation": "slice"
+          }
+        ]
+      },
+      {
+        "component_id": "wrap_veg_mix",
+        "display_name": "Wrap vegetable mix",
+        "ingredients": [
+          {
+            "ingredient_id": "bell_pepper",
+            "quantity": 50.0,
+            "operation": "slice"
+          },
+          {
+            "ingredient_id": "onion",
+            "quantity": 40.0,
+            "operation": "slice"
+          },
+          {
+            "ingredient_id": "lettuce",
+            "quantity": 30.0,
+            "operation": "shred"
+          },
+          {
+            "ingredient_id": "tortilla",
+            "quantity": 1.0,
+            "operation": "warm"
+          }
+        ]
+      }
+    ],
+    "cook_step": {
+      "operation": "saute_filling",
+      "station": "stove",
+      "ingredients": [
+        {
+          "ingredient_id": "oil",
+          "quantity": 10.0,
+          "operation": "measure"
+        }
+      ]
+    },
+    "assemble_step": {
+      "operation": "roll_wrap"
+    },
+    "substitutions": {
+      "paneer": [
+        {
+          "ingredient_id": "tofu",
+          "ratio": 1.0,
+          "quality_penalty": 0.05
+        }
+      ]
+    }
+  },
+  "garden_salad": {
+    "display_name": "Garden salad",
+    "sell_price": 9.0,
+    "components": [
+      {
+        "component_id": "salad_greens",
+        "display_name": "Chopped greens",
+        "ingredients": [
+          {
+            "ingredient_id": "lettuce",
+            "quantity": 60.0,
+            "operation": "chop"
+          }
+        ]
+      },
+      {
+        "component_id": "salad_fresh_cut",
+        "display_name": "Fresh cut vegetables",
+        "ingredients": [
+          {
+            "ingredient_id": "tomato",
+            "quantity": 40.0,
+            "operation": "dice"
+          },
+          {
+            "ingredient_id": "cucumber",
+            "quantity": 50.0,
+            "operation": "slice"
+          }
+        ]
+      }
+    ],
+    "cook_step": null,
+    "assemble_step": {
+      "operation": "toss_salad"
+    }
+  },
+  "veg_fried_rice": {
+    "display_name": "Vegetable fried rice",
+    "sell_price": 13.0,
+    "components": [
+      {
+        "component_id": "rice_portion",
+        "display_name": "Portioned rice",
+        "ingredients": [
+          {
+            "ingredient_id": "cooked_rice",
+            "quantity": 150.0,
+            "operation": "portion"
+          }
+        ]
+      },
+      {
+        "component_id": "fried_rice_veg",
+        "display_name": "Fried-rice vegetable kit",
+        "ingredients": [
+          {
+            "ingredient_id": "carrot",
+            "quantity": 40.0,
+            "operation": "dice"
+          },
+          {
+            "ingredient_id": "onion",
+            "quantity": 30.0,
+            "operation": "dice"
+          },
+          {
+            "ingredient_id": "peas",
+            "quantity": 40.0,
+            "operation": "portion"
+          },
+          {
+            "ingredient_id": "soy_sauce",
+            "quantity": 15.0,
+            "operation": "measure"
+          }
+        ]
+      }
+    ],
+    "cook_step": {
+      "operation": "stir_fry_rice",
+      "station": "wok",
+      "ingredients": [
+        {
+          "ingredient_id": "oil",
+          "quantity": 10.0,
+          "operation": "measure"
+        }
+      ]
+    },
+    "assemble_step": {
+      "operation": "plate_rice"
+    }
+  },
+  "lentil_soup": {
+    "display_name": "Lentil soup",
+    "sell_price": 12.0,
+    "components": [
+      {
+        "component_id": "lentil_base",
+        "display_name": "Rinsed lentils",
+        "ingredients": [
+          {
+            "ingredient_id": "lentils",
+            "quantity": 120.0,
+            "operation": "rinse"
+          }
+        ]
+      },
+      {
+        "component_id": "soup_aromatics",
+        "display_name": "Soup aromatics",
+        "ingredients": [
+          {
+            "ingredient_id": "onion",
+            "quantity": 30.0,
+            "operation": "dice"
+          },
+          {
+            "ingredient_id": "tomato",
+            "quantity": 50.0,
+            "operation": "dice"
+          },
+          {
+            "ingredient_id": "spinach",
+            "quantity": 40.0,
+            "operation": "chop"
+          }
+        ]
+      }
+    ],
+    "cook_step": {
+      "operation": "simmer_soup",
+      "station": "stove",
+      "ingredients": [
+        {
+          "ingredient_id": "oil",
+          "quantity": 10.0,
+          "operation": "measure"
+        }
+      ]
+    },
+    "assemble_step": null
+  }
+}

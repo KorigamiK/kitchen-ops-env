@@ -1,0 +1,14 @@
+spec_version: 1
+name: kitchen_ops_env
+type: space
+runtime: fastapi
+app: kitchen_ops_env.server.app:app
+port: 8000
+tasks:
+  - id: breakfast_omelette
+    difficulty: easy
+  - id: lunch_combo
+    difficulty: medium
+  - id: dinner_rush_stockout
+    difficulty: hard
+

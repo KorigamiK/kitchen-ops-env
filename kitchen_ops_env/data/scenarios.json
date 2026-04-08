@@ -1,0 +1,106 @@
+{
+  "breakfast_omelette": {
+    "title": "Breakfast Omelette Ticket",
+    "difficulty": "easy",
+    "description": "A single breakfast ticket must leave the pass quickly with minimal waste.",
+    "max_steps": 8,
+    "target_total_cost": 2.0,
+    "target_waste_cost": 0.25,
+    "orders": [
+      {
+        "order_id": "ord_easy_1",
+        "dish_id": "masala_omelette",
+        "guest": "Counter seat 4",
+        "due_by_step": 6
+      }
+    ],
+    "inventory": {
+      "egg": 4.0,
+      "onion": 200.0,
+      "tomato": 180.0,
+      "cilantro": 25.0,
+      "oil": 120.0
+    }
+  },
+  "lunch_combo": {
+    "title": "Lunch Combo Window",
+    "difficulty": "medium",
+    "description": "Two lunch orders share fresh produce. Finish both without over-prepping the cold station.",
+    "max_steps": 11,
+    "target_total_cost": 6.5,
+    "target_waste_cost": 0.6,
+    "orders": [
+      {
+        "order_id": "ord_med_1",
+        "dish_id": "garden_salad",
+        "guest": "Table 7",
+        "due_by_step": 7
+      },
+      {
+        "order_id": "ord_med_2",
+        "dish_id": "paneer_wrap",
+        "guest": "Table 9",
+        "due_by_step": 9
+      }
+    ],
+    "inventory": {
+      "tortilla": 2.0,
+      "paneer": 180.0,
+      "bell_pepper": 100.0,
+      "onion": 220.0,
+      "lettuce": 140.0,
+      "tomato": 160.0,
+      "cucumber": 120.0,
+      "oil": 120.0
+    }
+  },
+  "dinner_rush_stockout": {
+    "title": "Dinner Rush Stockout",
+    "difficulty": "hard",
+    "description": "Three orders arrive together and the paneer line is short. Recover the rush without blowing food cost.",
+    "max_steps": 15,
+    "target_total_cost": 7.0,
+    "target_waste_cost": 0.75,
+    "orders": [
+      {
+        "order_id": "ord_hard_1",
+        "dish_id": "paneer_wrap",
+        "guest": "Table 2",
+        "due_by_step": 10
+      },
+      {
+        "order_id": "ord_hard_2",
+        "dish_id": "veg_fried_rice",
+        "guest": "Table 3",
+        "due_by_step": 11
+      },
+      {
+        "order_id": "ord_hard_3",
+        "dish_id": "lentil_soup",
+        "guest": "Table 5",
+        "due_by_step": 13
+      }
+    ],
+    "inventory": {
+      "tortilla": 1.0,
+      "paneer": 60.0,
+      "tofu": 160.0,
+      "bell_pepper": 90.0,
+      "onion": 260.0,
+      "lettuce": 60.0,
+      "cooked_rice": 220.0,
+      "carrot": 100.0,
+      "peas": 90.0,
+      "soy_sauce": 80.0,
+      "lentils": 160.0,
+      "tomato": 170.0,
+      "spinach": 90.0,
+      "oil": 180.0
+    },
+    "preferred_recovery": {
+      "order_id": "ord_hard_1",
+      "ingredient_id": "paneer",
+      "preferred_substitute": "tofu"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+*.pyc
+dist/
+build/
+.env
+.env.local
+.env.hf
+.hf-space.env
+

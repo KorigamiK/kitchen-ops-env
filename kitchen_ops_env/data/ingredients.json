@@ -1,0 +1,156 @@
+{
+  "egg": {
+    "display_name": "Egg",
+    "unit": "piece",
+    "category": "protein",
+    "restock_pack": 6.0,
+    "restock_cost": 2.4,
+    "prep_shelf_life_steps": 2,
+    "source_note": "Inspired by USDA FoodData Central egg entries"
+  },
+  "onion": {
+    "display_name": "Onion",
+    "unit": "g",
+    "category": "vegetable",
+    "restock_pack": 300.0,
+    "restock_cost": 1.8,
+    "prep_shelf_life_steps": 4,
+    "source_note": "Inspired by USDA FoodData Central onion entries"
+  },
+  "tomato": {
+    "display_name": "Tomato",
+    "unit": "g",
+    "category": "vegetable",
+    "restock_pack": 300.0,
+    "restock_cost": 2.1,
+    "prep_shelf_life_steps": 3,
+    "source_note": "Inspired by USDA FoodData Central tomato entries"
+  },
+  "cilantro": {
+    "display_name": "Cilantro",
+    "unit": "g",
+    "category": "herb",
+    "restock_pack": 30.0,
+    "restock_cost": 0.9,
+    "prep_shelf_life_steps": 3,
+    "source_note": "Inspired by USDA FoodData Central herb entries"
+  },
+  "oil": {
+    "display_name": "Cooking oil",
+    "unit": "ml",
+    "category": "pantry",
+    "restock_pack": 500.0,
+    "restock_cost": 4.5,
+    "prep_shelf_life_steps": 99,
+    "source_note": "Inspired by USDA FoodData Central oil entries"
+  },
+  "tortilla": {
+    "display_name": "Tortilla",
+    "unit": "piece",
+    "category": "starch",
+    "restock_pack": 6.0,
+    "restock_cost": 3.6,
+    "prep_shelf_life_steps": 6,
+    "source_note": "Inspired by open packaged flatbread entries"
+  },
+  "paneer": {
+    "display_name": "Paneer",
+    "unit": "g",
+    "category": "protein",
+    "restock_pack": 200.0,
+    "restock_cost": 4.8,
+    "prep_shelf_life_steps": 3,
+    "source_note": "Curated ingredient aligned with restaurant inventory models"
+  },
+  "tofu": {
+    "display_name": "Tofu",
+    "unit": "g",
+    "category": "protein",
+    "restock_pack": 200.0,
+    "restock_cost": 3.6,
+    "prep_shelf_life_steps": 4,
+    "source_note": "Inspired by USDA soy-food entries"
+  },
+  "bell_pepper": {
+    "display_name": "Bell pepper",
+    "unit": "g",
+    "category": "vegetable",
+    "restock_pack": 300.0,
+    "restock_cost": 2.7,
+    "prep_shelf_life_steps": 4,
+    "source_note": "Inspired by USDA pepper entries"
+  },
+  "lettuce": {
+    "display_name": "Lettuce",
+    "unit": "g",
+    "category": "vegetable",
+    "restock_pack": 250.0,
+    "restock_cost": 1.8,
+    "prep_shelf_life_steps": 3,
+    "source_note": "Inspired by USDA lettuce entries"
+  },
+  "cucumber": {
+    "display_name": "Cucumber",
+    "unit": "g",
+    "category": "vegetable",
+    "restock_pack": 300.0,
+    "restock_cost": 1.5,
+    "prep_shelf_life_steps": 4,
+    "source_note": "Inspired by USDA cucumber entries"
+  },
+  "cooked_rice": {
+    "display_name": "Cooked rice",
+    "unit": "g",
+    "category": "starch",
+    "restock_pack": 500.0,
+    "restock_cost": 2.8,
+    "prep_shelf_life_steps": 4,
+    "source_note": "Curated cooked-rice inventory for quick-service simulation"
+  },
+  "carrot": {
+    "display_name": "Carrot",
+    "unit": "g",
+    "category": "vegetable",
+    "restock_pack": 300.0,
+    "restock_cost": 1.4,
+    "prep_shelf_life_steps": 5,
+    "source_note": "Inspired by USDA carrot entries"
+  },
+  "peas": {
+    "display_name": "Peas",
+    "unit": "g",
+    "category": "vegetable",
+    "restock_pack": 250.0,
+    "restock_cost": 1.8,
+    "prep_shelf_life_steps": 5,
+    "source_note": "Inspired by USDA peas entries"
+  },
+  "soy_sauce": {
+    "display_name": "Soy sauce",
+    "unit": "ml",
+    "category": "pantry",
+    "restock_pack": 150.0,
+    "restock_cost": 2.0,
+    "prep_shelf_life_steps": 99,
+    "source_note": "Curated pantry ingredient for restaurant simulation"
+  },
+  "lentils": {
+    "display_name": "Lentils",
+    "unit": "g",
+    "category": "legume",
+    "restock_pack": 500.0,
+    "restock_cost": 3.2,
+    "prep_shelf_life_steps": 99,
+    "source_note": "Inspired by USDA pulse entries"
+  },
+  "spinach": {
+    "display_name": "Spinach",
+    "unit": "g",
+    "category": "vegetable",
+    "restock_pack": 200.0,
+    "restock_cost": 1.6,
+    "prep_shelf_life_steps": 3,
+    "source_note": "Inspired by USDA spinach entries"
+  }
+}
+

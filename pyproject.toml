@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.24.2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kitchen-ops-env"
+version = "0.1.0"
+description = "A restaurant kitchen operations environment for OpenEnv"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "fastapi>=0.115.0,<1",
+    "httpx>=0.27.0,<1",
+    "openai>=2.7.2,<3",
+    "openenv-core[core]==0.2.3",
+    "pydantic>=2.8.0,<3",
+    "uvicorn>=0.30.0,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0,<9",
+]
+
+[project.scripts]
+kitchen-ops-server = "kitchen_ops_env.server.app:main"
+
+[tool.hatch.build]
+include = [
+    "kitchen_ops_env/**/*.py",
+    "kitchen_ops_env/data/*.json",
+    "README.md",
+    "DATA_SOURCES.md",
+    "Dockerfile",
+    "inference.py",
+    "openenv.yaml",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["kitchen_ops_env"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
