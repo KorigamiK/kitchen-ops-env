@@ -7,8 +7,13 @@ port: 8000
 tasks:
   - id: breakfast_omelette
     difficulty: easy
+  - id: salad_opening
+    difficulty: easy
   - id: lunch_combo
+    difficulty: medium
+  - id: wrap_restock_window
     difficulty: medium
   - id: dinner_rush_stockout
     difficulty: hard
-
+  - id: double_shortage_service
+    difficulty: hard

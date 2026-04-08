@@ -30,7 +30,6 @@ include = [
     "kitchen_ops_env/**/*.py",
     "kitchen_ops_env/data/*.json",
     "README.md",
-    "DATA_SOURCES.md",
     "Dockerfile",
     "inference.py",
     "openenv.yaml",

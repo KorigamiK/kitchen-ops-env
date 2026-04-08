@@ -8,7 +8,7 @@ ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 ENV ENABLE_WEB_INTERFACE=true
 
-COPY pyproject.toml uv.lock README.md DATA_SOURCES.md openenv.yaml ./
+COPY pyproject.toml uv.lock README.md openenv.yaml ./
 COPY kitchen_ops_env ./kitchen_ops_env
 COPY inference.py ./inference.py
 

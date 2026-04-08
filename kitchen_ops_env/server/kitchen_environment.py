@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
+import hashlib
 from copy import deepcopy
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -13,19 +12,10 @@ from openenv.core.env_server.types import EnvironmentMetadata
 
 try:
     from ..models import KitchenAction, KitchenObservation, KitchenState
+    from ..scenario_generator import INGREDIENTS, RECIPES, SCENARIOS, TASK_IDS
 except ImportError:
     from kitchen_ops_env.models import KitchenAction, KitchenObservation, KitchenState
-
-
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-INGREDIENTS: dict[str, dict[str, Any]] = json.loads(
-    (DATA_DIR / "ingredients.json").read_text()
-)
-RECIPES: dict[str, dict[str, Any]] = json.loads((DATA_DIR / "recipes.json").read_text())
-SCENARIOS: dict[str, dict[str, Any]] = json.loads(
-    (DATA_DIR / "scenarios.json").read_text()
-)
-TASK_IDS = list(SCENARIOS.keys())
+    from kitchen_ops_env.scenario_generator import INGREDIENTS, RECIPES, SCENARIOS, TASK_IDS
 
 
 def _clip01(value: float) -> float:
@@ -52,6 +42,8 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         self._procurement_cost = 0.0
         self._waste_cost = 0.0
         self._revenue = 0.0
+        self._idle_actions = 0
+        self._productive_actions = 0
         self._valid_actions = 0
         self._invalid_actions = 0
         self._state = KitchenState(episode_id=str(uuid4()), step_count=0)
@@ -102,6 +94,8 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         self._procurement_cost = 0.0
         self._waste_cost = 0.0
         self._revenue = 0.0
+        self._idle_actions = 0
+        self._productive_actions = 0
         self._valid_actions = 0
         self._invalid_actions = 0
         self._last_error = ""
@@ -122,22 +116,24 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
 
         reward = 0.0
         error = ""
+        progressed = False
         self._last_error = ""
 
         if action.action_type == "PREP_COMPONENT":
-            reward, error = self._handle_prep_component(action)
+            reward, error, progressed = self._handle_prep_component(action)
         elif action.action_type == "COOK_DISH":
-            reward, error = self._handle_cook_dish(action)
+            reward, error, progressed = self._handle_cook_dish(action)
         elif action.action_type == "ASSEMBLE_DISH":
-            reward, error = self._handle_assemble_dish(action)
+            reward, error, progressed = self._handle_assemble_dish(action)
         elif action.action_type == "SERVE_ORDER":
-            reward, error = self._handle_serve_order(action)
+            reward, error, progressed = self._handle_serve_order(action)
         elif action.action_type == "RESTOCK_INGREDIENT":
-            reward, error = self._handle_restock_ingredient(action)
+            reward, error, progressed = self._handle_restock_ingredient(action)
         elif action.action_type == "SUBSTITUTE_INGREDIENT":
-            reward, error = self._handle_substitute_ingredient(action)
+            reward, error, progressed = self._handle_substitute_ingredient(action)
         elif action.action_type == "CHECK_PROGRESS":
             reward = 0.0
+            self._idle_actions += 1
         else:
             error = f"Unsupported action: {action.action_type}"
 
@@ -146,6 +142,8 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
             self._last_error = error
         else:
             self._valid_actions += 1
+            if progressed:
+                self._productive_actions += 1
 
         self._last_reward = reward
         done = self._check_done()
@@ -158,22 +156,26 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
             version="0.1.0",
         )
 
-    def _handle_prep_component(self, action: KitchenAction) -> tuple[float, str]:
+    def _handle_prep_component(self, action: KitchenAction) -> tuple[float, str, bool]:
         order, recipe, error = self._get_order_and_recipe(action.order_id)
         if error:
-            return 0.0, error
+            return 0.0, error, False
         component = self._component_lookup(recipe, action.component_id)
         if component is None:
-            return 0.0, f"Unknown component_id: {action.component_id}"
+            return 0.0, f"Unknown component_id: {action.component_id}", False
         if component["component_id"] in order["completed_components"]:
-            return 0.0, f"Component already prepared: {component['component_id']}"
+            return 0.0, f"Component already prepared: {component['component_id']}", False
         next_component = self._next_component(order, recipe)
         if next_component is None or next_component["component_id"] != component["component_id"]:
-            return 0.0, "Components must be prepared in recipe order"
+            return 0.0, "Components must be prepared in recipe order", False
 
         shortages = self._component_shortages(order, recipe, component)
         if shortages:
-            return 0.0, f"Missing ingredient for component: {shortages[0]['actual_ingredient_id']}"
+            return (
+                0.0,
+                f"Missing ingredient for component: {shortages[0]['actual_ingredient_id']}",
+                False,
+            )
 
         prepared_ingredients: list[dict[str, Any]] = []
         component_cost = 0.0
@@ -213,22 +215,22 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
             }
         )
         self._refresh_order_status(order, recipe)
-        return 0.12, ""
+        return 0.12, "", True
 
-    def _handle_cook_dish(self, action: KitchenAction) -> tuple[float, str]:
+    def _handle_cook_dish(self, action: KitchenAction) -> tuple[float, str, bool]:
         order, recipe, error = self._get_order_and_recipe(action.order_id)
         if error:
-            return 0.0, error
+            return 0.0, error, False
         if recipe.get("cook_step") is None:
-            return 0.0, f"Dish {order['dish_id']} does not require cooking"
+            return 0.0, f"Dish {order['dish_id']} does not require cooking", False
         if order["cooked"]:
-            return 0.0, f"Dish already cooked for order {order['order_id']}"
+            return 0.0, f"Dish already cooked for order {order['order_id']}", False
         if self._next_component(order, recipe) is not None:
-            return 0.0, "Finish prep components before cooking"
+            return 0.0, "Finish prep components before cooking", False
 
         cook_shortages = self._cook_shortages(recipe)
         if cook_shortages:
-            return 0.0, f"Missing cook-stage ingredient: {cook_shortages[0]['ingredient_id']}"
+            return 0.0, f"Missing cook-stage ingredient: {cook_shortages[0]['ingredient_id']}", False
 
         cook_cost = 0.0
         for cook_ingredient in recipe["cook_step"].get("ingredients", []):
@@ -244,20 +246,20 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         ]
         order["cooked"] = True
         self._refresh_order_status(order, recipe)
-        return 0.18, ""
+        return 0.18, "", True
 
-    def _handle_assemble_dish(self, action: KitchenAction) -> tuple[float, str]:
+    def _handle_assemble_dish(self, action: KitchenAction) -> tuple[float, str, bool]:
         order, recipe, error = self._get_order_and_recipe(action.order_id)
         if error:
-            return 0.0, error
+            return 0.0, error, False
         if recipe.get("assemble_step") is None:
-            return 0.0, f"Dish {order['dish_id']} does not require assembly"
+            return 0.0, f"Dish {order['dish_id']} does not require assembly", False
         if order["assembled"]:
-            return 0.0, f"Dish already assembled for order {order['order_id']}"
+            return 0.0, f"Dish already assembled for order {order['order_id']}", False
         if self._next_component(order, recipe) is not None:
-            return 0.0, "Finish prep components before assembly"
+            return 0.0, "Finish prep components before assembly", False
         if recipe.get("cook_step") is not None and not order["cooked"]:
-            return 0.0, "Cook the dish before assembly"
+            return 0.0, "Cook the dish before assembly", False
 
         self._prepared_components = [
             component
@@ -266,22 +268,22 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         ]
         order["assembled"] = True
         self._refresh_order_status(order, recipe)
-        return 0.16, ""
+        return 0.16, "", True
 
-    def _handle_serve_order(self, action: KitchenAction) -> tuple[float, str]:
+    def _handle_serve_order(self, action: KitchenAction) -> tuple[float, str, bool]:
         order, recipe, error = self._get_order_and_recipe(action.order_id)
         if error:
-            return 0.0, error
+            return 0.0, error, False
         if order["served_at"] is not None:
-            return 0.0, f"Order already served: {order['order_id']}"
+            return 0.0, f"Order already served: {order['order_id']}", False
         if recipe.get("assemble_step") is not None:
             if not order["assembled"]:
-                return 0.0, "Assemble the dish before serving"
+                return 0.0, "Assemble the dish before serving", False
         elif recipe.get("cook_step") is not None:
             if not order["cooked"]:
-                return 0.0, "Cook the dish before serving"
+                return 0.0, "Cook the dish before serving", False
         elif self._next_component(order, recipe) is not None:
-            return 0.0, "Prep components before serving"
+            return 0.0, "Prep components before serving", False
 
         order["served_at"] = self._state.step_count
         order["status"] = "served"
@@ -290,27 +292,27 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         base_reward = 0.32 if on_time else 0.18
         reward = max(0.1, base_reward - float(order["quality_penalty"]))
         self._refresh_order_status(order, recipe)
-        return _round2(reward), ""
+        return _round2(reward), "", True
 
-    def _handle_restock_ingredient(self, action: KitchenAction) -> tuple[float, str]:
+    def _handle_restock_ingredient(self, action: KitchenAction) -> tuple[float, str, bool]:
         ingredient_id = action.ingredient_id
         if ingredient_id not in self._inventory:
-            return 0.0, f"Unknown ingredient_id: {ingredient_id}"
+            return 0.0, f"Unknown ingredient_id: {ingredient_id}", False
         if action.quantity <= 0:
-            return 0.0, "Restock quantity must be positive"
+            return 0.0, "Restock quantity must be positive", False
 
         was_short = self._ingredient_is_short(ingredient_id)
         self._inventory[ingredient_id]["quantity"] += action.quantity
         self._procurement_cost += self._unit_cost(ingredient_id) * action.quantity * 0.3
-        return (0.08 if was_short else 0.03), ""
+        return (0.08 if was_short else 0.03), "", was_short
 
-    def _handle_substitute_ingredient(self, action: KitchenAction) -> tuple[float, str]:
+    def _handle_substitute_ingredient(self, action: KitchenAction) -> tuple[float, str, bool]:
         order, recipe, error = self._get_order_and_recipe(action.order_id)
         if error:
-            return 0.0, error
+            return 0.0, error, False
         ingredient_id = action.ingredient_id
         if ingredient_id in order["substitutions"]:
-            return 0.0, f"Ingredient already substituted for order {order['order_id']}"
+            return 0.0, f"Ingredient already substituted for order {order['order_id']}", False
 
         allowed = recipe.get("substitutions", {}).get(ingredient_id, [])
         selected = next(
@@ -318,12 +320,12 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
             None,
         )
         if selected is None:
-            return 0.0, f"Invalid substitute {action.source_id} for {ingredient_id}"
+            return 0.0, f"Invalid substitute {action.source_id} for {ingredient_id}", False
 
         required_qty = self._required_quantity_for_ingredient(order, recipe, ingredient_id)
         substitute_qty = required_qty * float(selected.get("ratio", 1.0))
         if self._inventory[selected["ingredient_id"]]["quantity"] < substitute_qty:
-            return 0.0, f"Insufficient substitute stock: {selected['ingredient_id']}"
+            return 0.0, f"Insufficient substitute stock: {selected['ingredient_id']}", False
 
         order["substitutions"][ingredient_id] = {
             "ingredient_id": selected["ingredient_id"],
@@ -332,7 +334,7 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         }
         order["quality_penalty"] += float(selected.get("quality_penalty", 0.0))
         self._refresh_order_status(order, recipe)
-        return 0.1, ""
+        return 0.1, "", True
 
     def _get_order_and_recipe(
         self, order_id: str
@@ -440,10 +442,15 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
                 continue
             recipe = RECIPES[order["dish_id"]]
             next_component = self._next_component(order, recipe)
-            if next_component is None:
-                continue
-            shortages = self._component_shortages(order, recipe, next_component)
-            if any(shortage["actual_ingredient_id"] == ingredient_id for shortage in shortages):
+            shortages = []
+            if next_component is not None:
+                shortages = self._component_shortages(order, recipe, next_component)
+            elif recipe.get("cook_step") is not None and not order["cooked"]:
+                shortages = self._cook_shortages(recipe)
+            if any(
+                shortage.get("actual_ingredient_id", shortage.get("ingredient_id")) == ingredient_id
+                for shortage in shortages
+            ):
                 return True
         return False
 
@@ -485,16 +492,41 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
             return
         order["status"] = "pending"
 
-    def _action_priority(self, action_type: str) -> int:
+    def _action_payload(
+        self,
+        action_type: str,
+        order_id: str = "",
+        component_id: str = "",
+        ingredient_id: str = "",
+        quantity: float = 0.0,
+        source_id: str = "",
+        notes: str = "",
+    ) -> dict[str, Any]:
         return {
-            "SERVE_ORDER": 0,
-            "ASSEMBLE_DISH": 1,
-            "COOK_DISH": 2,
-            "SUBSTITUTE_INGREDIENT": 3,
-            "RESTOCK_INGREDIENT": 4,
-            "PREP_COMPONENT": 5,
-            "CHECK_PROGRESS": 99,
-        }.get(action_type, 99)
+            "action_type": action_type,
+            "order_id": order_id,
+            "component_id": component_id,
+            "ingredient_id": ingredient_id,
+            "quantity": _round2(quantity),
+            "source_id": source_id,
+            "notes": notes,
+        }
+
+    def _action_sort_key(self, action: dict[str, Any]) -> tuple[bool, str]:
+        signature = "|".join(
+            (
+                self._scenario_id,
+                str(self._state.step_count),
+                action.get("action_type", ""),
+                action.get("order_id", ""),
+                action.get("component_id", ""),
+                action.get("ingredient_id", ""),
+                str(action.get("quantity", 0.0)),
+                action.get("source_id", ""),
+            )
+        )
+        digest = hashlib.sha1(signature.encode("utf-8")).hexdigest()
+        return (action.get("action_type") == "CHECK_PROGRESS", digest)
 
     def _available_actions(self) -> list[dict[str, Any]]:
         actions: list[dict[str, Any]] = []
@@ -505,35 +537,11 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
             self._refresh_order_status(order, recipe)
 
             if recipe.get("assemble_step") is not None and order["assembled"]:
-                actions.append(
-                    {
-                        "action_type": "SERVE_ORDER",
-                        "order_id": order["order_id"],
-                        "component_id": "",
-                        "ingredient_id": "",
-                        "quantity": 0.0,
-                        "source_id": "",
-                        "notes": "",
-                        "description": f"Serve {recipe['display_name']} for {order['guest']}",
-                        "priority": self._action_priority("SERVE_ORDER"),
-                    }
-                )
+                actions.append(self._action_payload("SERVE_ORDER", order_id=order["order_id"]))
                 continue
 
             if recipe.get("assemble_step") is None and recipe.get("cook_step") is not None and order["cooked"]:
-                actions.append(
-                    {
-                        "action_type": "SERVE_ORDER",
-                        "order_id": order["order_id"],
-                        "component_id": "",
-                        "ingredient_id": "",
-                        "quantity": 0.0,
-                        "source_id": "",
-                        "notes": "",
-                        "description": f"Serve {recipe['display_name']} for {order['guest']}",
-                        "priority": self._action_priority("SERVE_ORDER"),
-                    }
-                )
+                actions.append(self._action_payload("SERVE_ORDER", order_id=order["order_id"]))
                 continue
 
             if recipe.get("assemble_step") is not None:
@@ -541,19 +549,7 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
                     recipe.get("cook_step") is None or order["cooked"]
                 )
                 if ready_to_assemble and not order["assembled"]:
-                    actions.append(
-                        {
-                            "action_type": "ASSEMBLE_DISH",
-                            "order_id": order["order_id"],
-                            "component_id": "",
-                            "ingredient_id": "",
-                            "quantity": 0.0,
-                            "source_id": "",
-                            "notes": "",
-                            "description": f"Assemble {recipe['display_name']}",
-                            "priority": self._action_priority("ASSEMBLE_DISH"),
-                        }
-                    )
+                    actions.append(self._action_payload("ASSEMBLE_DISH", order_id=order["order_id"]))
                     continue
 
             if recipe.get("cook_step") is not None and self._next_component(order, recipe) is None and not order["cooked"]:
@@ -561,32 +557,16 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
                 if cook_shortages:
                     shortage = cook_shortages[0]
                     actions.append(
-                        {
-                            "action_type": "RESTOCK_INGREDIENT",
-                            "order_id": order["order_id"],
-                            "component_id": "",
-                            "ingredient_id": shortage["ingredient_id"],
-                            "quantity": shortage["missing_quantity"],
-                            "source_id": "rush_supplier",
-                            "notes": "",
-                            "description": f"Restock {shortage['missing_quantity']} {self._inventory[shortage['ingredient_id']]['unit']} of {self._inventory[shortage['ingredient_id']]['display_name']} for cooking",
-                            "priority": self._action_priority("RESTOCK_INGREDIENT"),
-                        }
+                        self._action_payload(
+                            "RESTOCK_INGREDIENT",
+                            order_id=order["order_id"],
+                            ingredient_id=shortage["ingredient_id"],
+                            quantity=shortage["missing_quantity"],
+                            source_id="rush_supplier",
+                        )
                     )
                 else:
-                    actions.append(
-                        {
-                            "action_type": "COOK_DISH",
-                            "order_id": order["order_id"],
-                            "component_id": "",
-                            "ingredient_id": "",
-                            "quantity": 0.0,
-                            "source_id": "",
-                            "notes": "",
-                            "description": f"Cook {recipe['display_name']} at {recipe['cook_step']['station']}",
-                            "priority": self._action_priority("COOK_DISH"),
-                        }
-                    )
+                    actions.append(self._action_payload("COOK_DISH", order_id=order["order_id"]))
                 continue
 
             next_component = self._next_component(order, recipe)
@@ -598,68 +578,37 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
                 shortage = shortages[0]
                 for option in shortage["allowed_substitutes"]:
                     actions.append(
-                        {
-                            "action_type": "SUBSTITUTE_INGREDIENT",
-                            "order_id": order["order_id"],
-                            "component_id": next_component["component_id"],
-                            "ingredient_id": shortage["ingredient_id"],
-                            "quantity": shortage["required_quantity"],
-                            "source_id": option["ingredient_id"],
-                            "notes": "",
-                            "description": f"Use {INGREDIENTS[option['ingredient_id']]['display_name']} instead of {INGREDIENTS[shortage['ingredient_id']]['display_name']} for {next_component['display_name']}",
-                            "priority": self._action_priority("SUBSTITUTE_INGREDIENT"),
-                        }
+                        self._action_payload(
+                            "SUBSTITUTE_INGREDIENT",
+                            order_id=order["order_id"],
+                            component_id=next_component["component_id"],
+                            ingredient_id=shortage["ingredient_id"],
+                            quantity=shortage["required_quantity"],
+                            source_id=option["ingredient_id"],
+                        )
                     )
                 actions.append(
-                    {
-                        "action_type": "RESTOCK_INGREDIENT",
-                        "order_id": order["order_id"],
-                        "component_id": next_component["component_id"],
-                        "ingredient_id": shortage["actual_ingredient_id"],
-                        "quantity": shortage["missing_quantity"],
-                        "source_id": "rush_supplier",
-                        "notes": "",
-                        "description": f"Restock {shortage['missing_quantity']} {self._inventory[shortage['actual_ingredient_id']]['unit']} of {self._inventory[shortage['actual_ingredient_id']]['display_name']}",
-                        "priority": self._action_priority("RESTOCK_INGREDIENT"),
-                    }
+                    self._action_payload(
+                        "RESTOCK_INGREDIENT",
+                        order_id=order["order_id"],
+                        component_id=next_component["component_id"],
+                        ingredient_id=shortage["actual_ingredient_id"],
+                        quantity=shortage["missing_quantity"],
+                        source_id="rush_supplier",
+                    )
                 )
                 continue
 
-            ingredient_breakdown = ", ".join(
-                f"{ingredient_use['required_quantity']:.0f}{self._inventory[ingredient_use['actual_ingredient_id']]['unit']} {self._inventory[ingredient_use['actual_ingredient_id']]['display_name']}"
-                for ingredient_use in (
-                    self._resolved_ingredient_use(order, recipe, ingredient_req)
-                    for ingredient_req in next_component["ingredients"]
+            actions.append(
+                self._action_payload(
+                    "PREP_COMPONENT",
+                    order_id=order["order_id"],
+                    component_id=next_component["component_id"],
                 )
             )
-            actions.append(
-                {
-                    "action_type": "PREP_COMPONENT",
-                    "order_id": order["order_id"],
-                    "component_id": next_component["component_id"],
-                    "ingredient_id": "",
-                    "quantity": 0.0,
-                    "source_id": "",
-                    "notes": "",
-                    "description": f"Prep {next_component['display_name']} using {ingredient_breakdown}",
-                    "priority": self._action_priority("PREP_COMPONENT"),
-                }
-            )
 
-        actions.append(
-            {
-                "action_type": "CHECK_PROGRESS",
-                "order_id": "",
-                "component_id": "",
-                "ingredient_id": "",
-                "quantity": 0.0,
-                "source_id": "",
-                "notes": "",
-                "description": "Do nothing and inspect the board again",
-                "priority": self._action_priority("CHECK_PROGRESS"),
-            }
-        )
-        actions.sort(key=lambda action: (action.get("priority", 99), action.get("order_id", "")))
+        actions.append(self._action_payload("CHECK_PROGRESS"))
+        actions.sort(key=self._action_sort_key)
         return actions
 
     def _service_board(self) -> list[dict[str, Any]]:
@@ -751,6 +700,8 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
             "waste_cost": _round2(self._waste_cost),
             "revenue": _round2(self._revenue),
             "invalid_actions": self._invalid_actions,
+            "idle_actions": self._idle_actions,
+            "productive_actions": self._productive_actions,
             "valid_actions": self._valid_actions,
         }
 
@@ -761,12 +712,14 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         on_time_ratio = (
             sum(1 for order in served_orders if order["served_at"] <= int(order["due_by_step"])) / total_orders
         )
-        execution_accuracy = self._valid_actions / max(1, self._valid_actions + self._invalid_actions)
+        steps_taken = max(1, self._state.step_count)
         target_total_cost = float(self._scenario.get("target_total_cost", 1.0))
         target_waste_cost = float(self._scenario.get("target_waste_cost", 0.1))
         total_cost = self._food_cost + self._procurement_cost
-        cost_efficiency = _clip01(1.0 - max(0.0, total_cost - target_total_cost) / target_total_cost)
-        waste_efficiency = _clip01(1.0 - (self._waste_cost / max(target_waste_cost, 0.01)))
+        raw_cost_efficiency = _clip01(
+            1.0 - max(0.0, total_cost - target_total_cost) / max(target_total_cost, 0.01)
+        )
+        raw_waste_efficiency = _clip01(1.0 - (self._waste_cost / max(target_waste_cost, 0.01)))
 
         production_progress = 0.0
         for order in self._orders.values():
@@ -783,17 +736,31 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
             production_progress += completed / total
         production_progress /= total_orders
 
+        progress_gate = max(completion_ratio, production_progress)
+        cost_efficiency = _clip01(raw_cost_efficiency * progress_gate)
+        waste_efficiency = _clip01(raw_waste_efficiency * progress_gate)
+        execution_accuracy = _clip01(self._productive_actions / steps_taken)
+
+        lateness_steps = 0.0
+        for order in self._orders.values():
+            reference_step = (
+                int(order["served_at"]) if order["served_at"] is not None else self._state.step_count
+            )
+            lateness_steps += max(0, reference_step - int(order["due_by_step"]))
+        raw_lateness_efficiency = _clip01(1.0 - (lateness_steps / max(1.0, total_orders * 2.0)))
+        lateness_efficiency = _clip01(raw_lateness_efficiency * max(progress_gate, execution_accuracy))
+
         substitution_quality = 1.0
         preferred = self._scenario.get("preferred_recovery")
         if preferred:
             order = self._orders[preferred["order_id"]]
             selected = order["substitutions"].get(preferred["ingredient_id"])
             if selected and selected["ingredient_id"] == preferred["preferred_substitute"]:
-                substitution_quality = 1.0
+                substitution_quality = _clip01(1.0 - float(selected.get("quality_penalty", 0.0)))
             elif selected:
-                substitution_quality = 0.7
+                substitution_quality = _clip01(0.8 - float(selected.get("quality_penalty", 0.0)))
             elif order["served_at"] is not None:
-                substitution_quality = 0.55
+                substitution_quality = 0.6
             else:
                 substitution_quality = 0.0
 
@@ -804,6 +771,7 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
             "cost_efficiency": _round2(cost_efficiency),
             "waste_efficiency": _round2(waste_efficiency),
             "execution_accuracy": _round2(execution_accuracy),
+            "lateness_efficiency": _round2(lateness_efficiency),
             "substitution_quality": _round2(substitution_quality),
         }
 
@@ -811,26 +779,32 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         components = self.score_components()
         if self._scenario_id == "breakfast_omelette":
             score = (
-                0.60 * components["completion_ratio"]
+                0.45 * components["completion_ratio"]
                 + 0.25 * components["on_time_ratio"]
                 + 0.15 * components["execution_accuracy"]
+                + 0.10 * components["waste_efficiency"]
+                + 0.05 * components["lateness_efficiency"]
             )
         elif self._scenario_id == "lunch_combo":
             score = (
-                0.40 * components["completion_ratio"]
+                0.30 * components["completion_ratio"]
                 + 0.20 * components["on_time_ratio"]
                 + 0.15 * components["production_progress"]
-                + 0.15 * components["cost_efficiency"]
+                + 0.10 * components["cost_efficiency"]
                 + 0.10 * components["waste_efficiency"]
+                + 0.10 * components["execution_accuracy"]
+                + 0.05 * components["lateness_efficiency"]
             )
         else:
             score = (
-                0.30 * components["completion_ratio"]
+                0.25 * components["completion_ratio"]
                 + 0.15 * components["on_time_ratio"]
                 + 0.15 * components["production_progress"]
                 + 0.15 * components["substitution_quality"]
-                + 0.15 * components["cost_efficiency"]
+                + 0.10 * components["cost_efficiency"]
                 + 0.10 * components["waste_efficiency"]
+                + 0.05 * components["execution_accuracy"]
+                + 0.05 * components["lateness_efficiency"]
             )
         return round(_clip01(score), 3)
 
@@ -889,4 +863,3 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         self._state.kpis = deepcopy(self._kpis())
         self._state.score_components = deepcopy(self.score_components())
         return self._state
-
