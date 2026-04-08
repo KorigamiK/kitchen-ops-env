@@ -2,6 +2,7 @@
 title: Kitchen Ops Env
 sdk: docker
 app_port: 8000
+base_path: /web
 ---
 
 # Kitchen Ops Env

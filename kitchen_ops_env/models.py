@@ -51,8 +51,8 @@ class KitchenState(State):
     prepared_components: list[dict[str, Any]] = Field(
         default_factory=list, description="Prepared recipe components waiting to be used"
     )
-    kpis: dict[str, Any] = Field(
-        default_factory=dict, description="Episode KPI summary"
+    kitchen_status: dict[str, Any] = Field(
+        default_factory=dict, description="Human-friendly kitchen summary"
     )
     score_components: dict[str, float] = Field(
         default_factory=dict, description="Latest grading components"
@@ -63,22 +63,11 @@ class KitchenObservation(Observation):
     """Observation presented to the agent."""
 
     scenario_id: str = Field(..., description="Current scenario/task id")
-    scenario_description: str = Field(..., description="Scenario description")
     current_step: int = Field(default=0, description="Current kitchen clock step")
     max_steps: int = Field(default=0, description="Episode horizon")
-    service_board: list[dict[str, Any]] = Field(
-        default_factory=list, description="Orders visible on the pass"
-    )
-    inventory: list[dict[str, Any]] = Field(
-        default_factory=list, description="Inventory snapshot with quantities"
-    )
-    prepared_components: list[dict[str, Any]] = Field(
-        default_factory=list, description="Prepared components and freshness"
+    briefing: str = Field(
+        default="", description="Plain-English kitchen briefing for this turn"
     )
     available_actions: list[dict[str, Any]] = Field(
         default_factory=list, description="Concrete legal actions available right now"
     )
-    kpis: dict[str, Any] = Field(
-        default_factory=dict, description="Revenue, cost, waste, and service metrics"
-    )
-

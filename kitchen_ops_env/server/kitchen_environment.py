@@ -156,6 +156,84 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
             version="0.1.0",
         )
 
+    def _ingredient_name(self, ingredient_id: str) -> str:
+        return self._inventory.get(ingredient_id, {}).get("display_name", ingredient_id.replace("_", " "))
+
+    def _component_name(self, order_id: str, component_id: str) -> str:
+        if not order_id or order_id not in self._orders:
+            return component_id.replace("_", " ")
+        recipe = RECIPES[self._orders[order_id]["dish_id"]]
+        component = self._component_lookup(recipe, component_id)
+        if component is None:
+            return component_id.replace("_", " ")
+        return component["display_name"]
+
+    def _friendly_status(self, status: str) -> str:
+        return {
+            "pending": "waiting to start",
+            "prepping": "in prep",
+            "prep_complete": "ready to cook",
+            "ready_to_cook": "ready to cook",
+            "ready_to_assemble": "ready to assemble",
+            "ready_to_serve": "ready to serve",
+            "served": "served",
+        }.get(status, status.replace("_", " "))
+
+    def _format_amount(self, quantity: float, unit: str) -> str:
+        return f"{_round2(quantity)} {unit}"
+
+    def _action_copy(
+        self,
+        action_type: str,
+        order_id: str,
+        component_id: str,
+        ingredient_id: str,
+        quantity: float,
+        source_id: str,
+    ) -> tuple[str, str]:
+        dish_name = ""
+        if order_id and order_id in self._orders:
+            dish_name = RECIPES[self._orders[order_id]["dish_id"]]["display_name"]
+        component_name = self._component_name(order_id, component_id) if component_id else ""
+        ingredient_name = self._ingredient_name(ingredient_id) if ingredient_id else ""
+        source_name = self._ingredient_name(source_id) if source_id and source_id != "rush_supplier" else ""
+
+        if action_type == "PREP_COMPONENT":
+            label = f"Prep {component_name} for {order_id}"
+            details = f"Prepare {component_name.lower()} for {dish_name} on ticket {order_id}."
+        elif action_type == "COOK_DISH":
+            label = f"Cook {dish_name} for {order_id}"
+            details = f"Cook ticket {order_id} so {dish_name.lower()} can move to the next stage."
+        elif action_type == "ASSEMBLE_DISH":
+            label = f"Assemble {dish_name} for {order_id}"
+            details = f"Finish building {dish_name.lower()} for ticket {order_id}."
+        elif action_type == "SERVE_ORDER":
+            label = f"Serve {order_id}"
+            details = f"Send ticket {order_id} for {dish_name.lower()} out to the guest."
+        elif action_type == "RESTOCK_INGREDIENT":
+            amount = self._format_amount(quantity, self._inventory[ingredient_id]["unit"])
+            label = f"Rush-buy {ingredient_name} for {order_id}"
+            details = f"Bring in {amount} of {ingredient_name.lower()} for ticket {order_id}."
+        elif action_type == "SUBSTITUTE_INGREDIENT":
+            label = f"Swap {ingredient_name} for {source_name} in {order_id}"
+            details = (
+                f"Use {source_name.lower()} instead of {ingredient_name.lower()} for "
+                f"{component_name.lower()} on ticket {order_id}."
+            )
+        else:
+            label = "Pause and review the kitchen"
+            details = "Take no kitchen action and just check the current situation."
+        return label, details
+
+    def _shortage_note(self, shortage: dict[str, Any]) -> str:
+        ingredient_name = self._ingredient_name(shortage["ingredient_id"])
+        missing = self._format_amount(shortage["missing_quantity"], shortage["unit"])
+        swaps = shortage.get("allowed_substitutes", [])
+        if swaps:
+            swap_names = ", ".join(self._ingredient_name(item) for item in swaps)
+            return f"{ingredient_name} is short by {missing}. Swap option: {swap_names}."
+        return f"{ingredient_name} is short by {missing}."
+
     def _handle_prep_component(self, action: KitchenAction) -> tuple[float, str, bool]:
         order, recipe, error = self._get_order_and_recipe(action.order_id)
         if error:
@@ -500,17 +578,30 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         ingredient_id: str = "",
         quantity: float = 0.0,
         source_id: str = "",
-        notes: str = "",
     ) -> dict[str, Any]:
-        return {
+        label, _details = self._action_copy(
+            action_type,
+            order_id,
+            component_id,
+            ingredient_id,
+            quantity,
+            source_id,
+        )
+        payload: dict[str, Any] = {
             "action_type": action_type,
-            "order_id": order_id,
-            "component_id": component_id,
-            "ingredient_id": ingredient_id,
-            "quantity": _round2(quantity),
-            "source_id": source_id,
-            "notes": notes,
+            "label": label,
         }
+        if order_id:
+            payload["order_id"] = order_id
+        if component_id:
+            payload["component_id"] = component_id
+        if ingredient_id:
+            payload["ingredient_id"] = ingredient_id
+        if quantity > 0:
+            payload["quantity"] = _round2(quantity)
+        if source_id:
+            payload["source_id"] = source_id
+        return payload
 
     def _action_sort_key(self, action: dict[str, Any]) -> tuple[bool, str]:
         signature = "|".join(
@@ -616,44 +707,87 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         for order in sorted(self._orders.values(), key=lambda item: (item["due_by_step"], item["order_id"])):
             recipe = RECIPES[order["dish_id"]]
             next_component = self._next_component(order, recipe)
-            shortages = (
+            raw_shortages = (
                 self._component_shortages(order, recipe, next_component)
                 if next_component is not None
                 else []
             )
+            shortages = []
+            for shortage in raw_shortages:
+                ingredient_name = self._ingredient_name(shortage["ingredient_id"])
+                item = {
+                    "ingredient": ingredient_name,
+                    "ingredient_id": shortage["ingredient_id"],
+                    "missing": self._format_amount(
+                        shortage["missing_quantity"],
+                        self._inventory[shortage["actual_ingredient_id"]]["unit"],
+                    ),
+                    "missing_quantity": shortage["missing_quantity"],
+                    "unit": self._inventory[shortage["actual_ingredient_id"]]["unit"],
+                }
+                if shortage["actual_ingredient_id"] != shortage["ingredient_id"]:
+                    item["using_now"] = self._ingredient_name(shortage["actual_ingredient_id"])
+                    item["actual_ingredient_id"] = shortage["actual_ingredient_id"]
+                substitutes = [
+                    option["ingredient_id"] for option in shortage.get("allowed_substitutes", [])
+                ]
+                if substitutes:
+                    item["swap_options"] = [self._ingredient_name(option) for option in substitutes]
+                    item["allowed_substitutes"] = substitutes
+                shortages.append(item)
+            completed_names = [
+                self._component_name(order["order_id"], component_id)
+                for component_id in order["completed_components"]
+            ]
+            substitutions = {
+                self._ingredient_name(original): self._ingredient_name(choice["ingredient_id"])
+                for original, choice in order["substitutions"].items()
+            }
             board.append(
                 {
                     "order_id": order["order_id"],
-                    "guest": order["guest"],
-                    "dish_id": order["dish_id"],
-                    "dish_name": recipe["display_name"],
-                    "due_by_step": order["due_by_step"],
+                    "dish": recipe["display_name"],
+                    "time_left": int(order["due_by_step"]) - self._state.step_count,
                     "slack_steps": int(order["due_by_step"]) - self._state.step_count,
+                    "stage": self._friendly_status(order["status"]),
                     "status": order["status"],
-                    "completed_components": list(order["completed_components"]),
-                    "total_components": len(recipe["components"]),
-                    "cooked": order["cooked"],
-                    "assembled": order["assembled"],
-                    "served_at": order["served_at"],
-                    "substitutions": deepcopy(order["substitutions"]),
-                    "quality_penalty": _round2(order["quality_penalty"]),
+                    "prep_progress": f"{len(order['completed_components'])}/{len(recipe['components'])}",
+                    "completed_components": completed_names,
+                    "substitutions": substitutions,
+                    "next_step": next_component["display_name"] if next_component else "",
                     "next_component_id": next_component["component_id"] if next_component else "",
+                    "blocking_issue": self._shortage_note(shortages[0]) if shortages else "",
                     "missing_ingredients": shortages,
                 }
             )
         return board
 
     def _inventory_snapshot(self) -> list[dict[str, Any]]:
+        visible_ids: set[str] = set()
+        for order in self._orders.values():
+            if order["served_at"] is not None:
+                continue
+            recipe = RECIPES[order["dish_id"]]
+            for component in recipe["components"]:
+                for ingredient_req in component["ingredients"]:
+                    resolved = self._resolved_ingredient_use(order, recipe, ingredient_req)
+                    visible_ids.add(resolved["actual_ingredient_id"])
+            cook_step = recipe.get("cook_step") or {}
+            for ingredient_req in cook_step.get("ingredients", []):
+                visible_ids.add(ingredient_req["ingredient_id"])
+
         snapshot = []
         for ingredient_id, item in sorted(self._inventory.items()):
+            if ingredient_id not in visible_ids and item["quantity"] <= 0:
+                continue
             snapshot.append(
                 {
                     "ingredient_id": ingredient_id,
-                    "display_name": item["display_name"],
-                    "category": item["category"],
+                    "name": item["display_name"],
+                    "on_hand": self._format_amount(item["quantity"], item["unit"]),
                     "quantity": _round2(item["quantity"]),
                     "unit": item["unit"],
-                    "low_stock": item["quantity"] <= item["restock_pack"] * 0.25,
+                    "running_low": item["quantity"] <= item["restock_pack"] * 0.25,
                     "unit_cost": _round2(self._unit_cost(ingredient_id)),
                 }
             )
@@ -668,42 +802,172 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
             snapshot.append(
                 {
                     "order_id": prepared["order_id"],
-                    "dish_id": prepared["dish_id"],
                     "component_id": prepared["component_id"],
-                    "display_name": prepared["display_name"],
+                    "name": prepared["display_name"],
+                    "use_within": f"{int(prepared['expires_at']) - self._state.step_count} steps",
                     "expires_in_steps": int(prepared["expires_at"]) - self._state.step_count,
-                    "component_cost": _round2(prepared["component_cost"]),
-                    "ingredients": deepcopy(prepared["ingredients"]),
                 }
             )
         return snapshot
 
-    def _kpis(self) -> dict[str, Any]:
+    def _state_inventory(self) -> dict[str, dict[str, Any]]:
+        return {
+            item["ingredient_id"]: {
+                "name": item["name"],
+                "quantity": item["quantity"],
+                "unit": item["unit"],
+                "running_low": item["running_low"],
+                "unit_cost": item["unit_cost"],
+            }
+            for item in self._inventory_snapshot()
+        }
+
+    def _state_orders(self) -> dict[str, dict[str, Any]]:
+        return {
+            order["order_id"]: {
+                "dish": order["dish"],
+                "status": order["status"],
+                "stage": order["stage"],
+                "due_in_steps": order["time_left"],
+                "prep_progress": order["prep_progress"],
+                "completed_components": order["completed_components"],
+                "next_step": order["next_step"],
+                "blocking_issue": order["blocking_issue"],
+                "substitutions": order["substitutions"],
+            }
+            for order in self._service_board()
+        }
+
+    def _state_prepared_components(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "order_id": item["order_id"],
+                "component_id": item["component_id"],
+                "name": item["name"],
+                "use_within": item["use_within"],
+            }
+            for item in self._prepared_snapshot()
+        ]
+
+    def _kitchen_status(self) -> dict[str, Any]:
         served_orders = sum(1 for order in self._orders.values() if order["served_at"] is not None)
         on_time_orders = sum(
             1
             for order in self._orders.values()
             if order["served_at"] is not None and order["served_at"] <= int(order["due_by_step"])
         )
+        late_orders = sum(
+            1
+            for order in self._orders.values()
+            if order["served_at"] is not None and order["served_at"] > int(order["due_by_step"])
+        )
         return {
-            "orders_total": len(self._orders),
-            "orders_served": served_orders,
-            "orders_on_time": on_time_orders,
-            "orders_late": sum(
-                1
-                for order in self._orders.values()
-                if order["served_at"] is not None and order["served_at"] > int(order["due_by_step"])
-            ),
-            "food_cost": _round2(self._food_cost),
-            "procurement_cost": _round2(self._procurement_cost),
-            "total_cost": _round2(self._food_cost + self._procurement_cost),
-            "waste_cost": _round2(self._waste_cost),
-            "revenue": _round2(self._revenue),
-            "invalid_actions": self._invalid_actions,
-            "idle_actions": self._idle_actions,
-            "productive_actions": self._productive_actions,
-            "valid_actions": self._valid_actions,
+            "tickets_open": len(self._orders) - served_orders,
+            "tickets_served": served_orders,
+            "served_on_time": on_time_orders,
+            "served_late": late_orders,
+            "food_spend": _round2(self._food_cost),
+            "rush_spend": _round2(self._procurement_cost),
+            "total_spend": _round2(self._food_cost + self._procurement_cost),
+            "waste": _round2(self._waste_cost),
+            "sales": _round2(self._revenue),
+            "good_moves": self._productive_actions,
+            "idle_checks": self._idle_actions,
+            "bad_moves": self._invalid_actions,
+            "moves_taken": self._valid_actions,
         }
+
+    def _action_guide(self, actions: list[dict[str, Any]]) -> list[str]:
+        return [f"{index}. {action['label']}" for index, action in enumerate(actions, start=1)]
+
+    def _build_briefing(
+        self,
+        service_board: list[dict[str, Any]],
+        inventory: list[dict[str, Any]],
+        prepared_components: list[dict[str, Any]],
+        available_actions: list[dict[str, Any]],
+        error: str,
+    ) -> str:
+        lines = [
+            "You are running the kitchen for the current service window.",
+            f"Task: {self._scenario.get('title', self._scenario_id)}.",
+            self._scenario["description"],
+            f"Clock: step {self._state.step_count} of {self._scenario['max_steps']}.",
+        ]
+        if error:
+            lines.append(f"Current problem: {error}.")
+
+        open_tickets = [order for order in service_board if order["status"] != "served"]
+        if open_tickets:
+            first_due = open_tickets[0]
+            lines.append(
+                f"{len(open_tickets)} tickets still need work. "
+                f"The most urgent is {first_due['order_id']} ({first_due['dish']}) "
+                f"with {first_due['time_left']} steps left."
+            )
+        else:
+            lines.append("Every ticket has been served.")
+
+        lines.append("")
+        lines.append("Open tickets:")
+        if open_tickets:
+            for order in open_tickets:
+                line = (
+                    f"- {order['order_id']}: {order['dish']}, {order['stage']}, "
+                    f"prep {order['prep_progress']}, {order['time_left']} steps left."
+                )
+                if order["next_step"]:
+                    line += f" Next: {order['next_step']}."
+                if order["blocking_issue"]:
+                    line += f" Blocked: {order['blocking_issue']}"
+                if order["substitutions"]:
+                    swaps = ", ".join(
+                        f"{original} -> {replacement}"
+                        for original, replacement in order["substitutions"].items()
+                    )
+                    line += f" Current swaps: {swaps}."
+                lines.append(line)
+        else:
+            lines.append("- None.")
+
+        lines.append("")
+        lines.append("Stock to watch:")
+        low_stock_items = [
+            item
+            for item in inventory
+            if item.get("running_low")
+            and any(item["name"] in order["blocking_issue"] for order in open_tickets)
+        ]
+        if not low_stock_items:
+            low_stock_items = [item for item in inventory if item.get("running_low")]
+        if low_stock_items:
+            for item in low_stock_items[:4]:
+                lines.append(f"- {item['name']}: {item['on_hand']} left.")
+        else:
+            lines.append("- Nothing is running low right now.")
+
+        lines.append("")
+        lines.append("Prepared items waiting on the line:")
+        if prepared_components:
+            for item in prepared_components:
+                lines.append(
+                    f"- {item['order_id']}: {item['name']} should be used within {item['use_within']}."
+                )
+        else:
+            lines.append("- None.")
+
+        lines.append("")
+        lines.append("Legal moves right now:")
+        lines.extend(self._action_guide(available_actions))
+        lines.extend(
+            [
+                "",
+                "Reply with exactly one JSON action using these keys:",
+                '{"action_type": "...", "order_id": "...", "component_id": "...", "ingredient_id": "...", "quantity": 0.0, "source_id": "...", "notes": ""}',
+                "Use empty strings for fields you do not need.",
+            ]
+        )
+        return "\n".join(lines)
 
     def score_components(self) -> dict[str, float]:
         total_orders = max(1, len(self._orders))
@@ -812,34 +1076,36 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         self, reward: float, done: bool, error: str
     ) -> KitchenObservation:
         components = self.score_components()
+        service_board = self._service_board()
+        inventory = self._inventory_snapshot()
+        prepared_components = self._prepared_snapshot()
+        available_actions = self._available_actions()
+        kitchen_status = self._kitchen_status()
         observation = KitchenObservation(
             scenario_id=self._scenario_id,
-            scenario_description=self._scenario["description"],
             current_step=self._state.step_count,
             max_steps=self._scenario["max_steps"],
-            service_board=self._service_board(),
-            inventory=self._inventory_snapshot(),
-            prepared_components=self._prepared_snapshot(),
-            available_actions=self._available_actions(),
-            kpis=self._kpis(),
+            briefing=self._build_briefing(
+                service_board,
+                inventory,
+                prepared_components,
+                available_actions,
+                error,
+            ),
+            available_actions=available_actions,
             done=done,
             reward=_round2(reward),
             metadata={
-                "scenario_title": self._scenario["title"],
-                "difficulty": self._scenario["difficulty"],
-                "last_error": error,
-                "last_action": deepcopy(self._last_action),
-                "score_preview": self.grade_episode(),
-                "score_components": components,
+                "last_action_error": error,
             },
         )
         self._state.scenario_id = self._scenario_id
         self._state.scenario_description = self._scenario["description"]
         self._state.max_steps = self._scenario["max_steps"]
-        self._state.inventory = deepcopy(self._inventory)
-        self._state.orders = deepcopy(self._orders)
-        self._state.prepared_components = deepcopy(self._prepared_components)
-        self._state.kpis = deepcopy(self._kpis())
+        self._state.inventory = self._state_inventory()
+        self._state.orders = self._state_orders()
+        self._state.prepared_components = self._state_prepared_components()
+        self._state.kitchen_status = deepcopy(kitchen_status)
         self._state.score_components = deepcopy(components)
         return observation
 
@@ -857,9 +1123,9 @@ class KitchenOpsEnvironment(Environment[KitchenAction, KitchenObservation, Kitch
         self._state.scenario_id = self._scenario_id
         self._state.scenario_description = self._scenario["description"]
         self._state.max_steps = self._scenario["max_steps"]
-        self._state.inventory = deepcopy(self._inventory)
-        self._state.orders = deepcopy(self._orders)
-        self._state.prepared_components = deepcopy(self._prepared_components)
-        self._state.kpis = deepcopy(self._kpis())
+        self._state.inventory = self._state_inventory()
+        self._state.orders = self._state_orders()
+        self._state.prepared_components = self._state_prepared_components()
+        self._state.kitchen_status = deepcopy(self._kitchen_status())
         self._state.score_components = deepcopy(self.score_components())
         return self._state

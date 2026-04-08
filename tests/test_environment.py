@@ -22,6 +22,9 @@ def test_easy_path_scores_high() -> None:
     env = KitchenOpsEnvironment()
     obs = env.reset(task_id="breakfast_omelette")
     assert obs.scenario_id == "breakfast_omelette"
+    assert "Open tickets:" in obs.briefing
+    assert "Last move:" not in obs.briefing
+    assert len(obs.available_actions) >= 1
 
     env.step(
         KitchenAction(action_type="PREP_COMPONENT", order_id="ord_easy_1", component_id="omelette_base")
@@ -50,10 +53,9 @@ def test_substitution_changes_order_state() -> None:
         )
     )
 
-    substitutions = next(
-        order["substitutions"] for order in obs.service_board if order["order_id"] == "ord_hard_1"
-    )
-    assert substitutions["paneer"]["ingredient_id"] == "tofu"
+    substitutions = env.state.orders["ord_hard_1"]["substitutions"]
+    assert substitutions["Paneer"] == "Tofu"
+    assert "Current swaps: Paneer -> Tofu." in obs.briefing
     assert 0.0 <= env.grade_episode() <= 1.0
 
 
@@ -76,6 +78,18 @@ def test_first_available_policy_is_not_enough() -> None:
 
 def test_generated_task_count() -> None:
     assert len(TASK_IDS) >= 6
+
+
+def test_state_is_sanitized() -> None:
+    env = KitchenOpsEnvironment()
+    env.reset(task_id="double_shortage_service")
+    state = env.state
+
+    tomato = state.inventory["tomato"]
+    assert "source_note" not in tomato
+    assert "restock_pack" not in tomato
+    assert "restock_cost" not in tomato
+    assert set(tomato).issubset({"name", "quantity", "unit", "running_low", "unit_cost"})
 
 
 def test_deterministic_baseline_clears_generated_tasks() -> None:
