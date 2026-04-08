@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
-import textwrap
 from typing import Any
 
 import httpx
@@ -14,14 +14,14 @@ from openai import OpenAI
 
 from kitchen_ops_env import KitchenAction, KitchenOpsEnv
 
+HF_TOKEN = os.getenv("HF_TOKEN")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://models.github.ai/inference")
 MODEL_NAME = os.getenv("MODEL_NAME", "openai/gpt-4o")
-HF_TOKEN = os.getenv("HF_TOKEN")
+BENCHMARK = "kitchen_ops_env"
 ENV_URL = os.getenv("KITCHEN_ENV_URL", "http://localhost:8000")
-USE_LLM_BASELINE = os.getenv("USE_LLM_BASELINE", "0").lower() in {"1", "true", "yes"}
-ENV_NAME = "kitchen_ops_env"
+SUCCESS_SCORE_THRESHOLD = 0.1
 
-client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN) if USE_LLM_BASELINE and HF_TOKEN else None
+client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN) if HF_TOKEN else None
 
 
 def log_start(task: str, env: str, model: str) -> None:
@@ -67,44 +67,99 @@ def _action_identity(candidate: dict[str, Any]) -> tuple[str, str, str, str, str
     )
 
 
-def _find_shortage(order: dict[str, Any] | None, ingredient_id: str) -> dict[str, Any] | None:
-    if order is None:
-        return None
-    return next(
-        (
-            shortage
-            for shortage in order.get("missing_ingredients", [])
-            if shortage.get("ingredient_id") == ingredient_id
-            or shortage.get("actual_ingredient_id") == ingredient_id
-        ),
-        None,
-    )
+def _format_action_for_log(action: KitchenAction) -> str:
+    if action.action_type == "PREP_COMPONENT":
+        return f"prep_component('{action.order_id}','{action.component_id}')"
+    if action.action_type == "COOK_DISH":
+        return f"cook_dish('{action.order_id}')"
+    if action.action_type == "ASSEMBLE_DISH":
+        return f"assemble_dish('{action.order_id}')"
+    if action.action_type == "SERVE_ORDER":
+        return f"serve_order('{action.order_id}')"
+    if action.action_type == "RESTOCK_INGREDIENT":
+        return (
+            f"restock_ingredient('{action.order_id}','{action.ingredient_id}',"
+            f"{action.quantity:.2f},'{action.source_id}')"
+        )
+    if action.action_type == "SUBSTITUTE_INGREDIENT":
+        return (
+            f"substitute_ingredient('{action.order_id}','{action.ingredient_id}',"
+            f"'{action.source_id}')"
+        )
+    return "check_progress()"
 
 
-def _heuristic_score(action: dict[str, Any], observation: Any) -> float:
+def _briefing_context(briefing: str) -> dict[str, Any]:
+    urgent_order = ""
+    match = re.search(r"most urgent is (ord_[A-Za-z0-9_]+)", briefing)
+    if match:
+        urgent_order = match.group(1)
+
+    order_stages: dict[str, str] = {}
+    time_left: dict[str, int] = {}
+    blocked_orders: set[str] = set()
+    expiring_orders: set[str] = set()
+    swapped_orders: set[str] = set()
+    in_prepared_section = False
+
+    for raw_line in briefing.splitlines():
+        line = raw_line.strip()
+        if line == "Prepared items waiting on the line:":
+            in_prepared_section = True
+            continue
+        if line == "Legal moves right now:":
+            in_prepared_section = False
+            continue
+
+        order_match = re.match(
+            r"- (ord_[^:]+): .*?, ([^,]+), prep [^,]+, (\d+) steps left\.",
+            line,
+        )
+        if order_match:
+            order_id, stage, steps_left = order_match.groups()
+            order_stages[order_id] = stage.strip().lower()
+            time_left[order_id] = int(steps_left)
+            if "Blocked:" in line:
+                blocked_orders.add(order_id)
+            if "Current swaps:" in line:
+                swapped_orders.add(order_id)
+            continue
+
+        if in_prepared_section:
+            prepared_match = re.match(r"- (ord_[^:]+): ", line)
+            if prepared_match:
+                expiring_orders.add(prepared_match.group(1))
+
+    return {
+        "urgent_order": urgent_order,
+        "order_stages": order_stages,
+        "time_left": time_left,
+        "blocked_orders": blocked_orders,
+        "expiring_orders": expiring_orders,
+        "swapped_orders": swapped_orders,
+    }
+
+
+def _heuristic_score(action: dict[str, Any], context: dict[str, Any]) -> float:
     action_type = action.get("action_type", "CHECK_PROGRESS")
     if action_type == "CHECK_PROGRESS":
         return -1_000_000.0
 
-    order_map = {order["order_id"]: order for order in observation.service_board}
-    inventory_map = {item["ingredient_id"]: item for item in observation.inventory}
-    prepared_expiry: dict[str, int] = {}
-    for prepared in observation.prepared_components:
-        order_id = prepared.get("order_id", "")
-        expires_in = int(prepared.get("expires_in_steps", 99))
-        prepared_expiry[order_id] = min(prepared_expiry.get(order_id, expires_in), expires_in)
-    active_prepared_orders = set(prepared_expiry)
-
+    order_id = action.get("order_id", "")
+    order_stages = context["order_stages"]
+    time_left = context["time_left"]
+    blocked_orders = context["blocked_orders"]
+    expiring_orders = context["expiring_orders"]
+    swapped_orders = context["swapped_orders"]
     ready_to_serve_orders = {
-        order["order_id"] for order in observation.service_board if order.get("status") == "ready_to_serve"
+        item_id for item_id, stage in order_stages.items() if stage == "ready to serve"
     }
     ready_to_assemble_orders = {
-        order["order_id"] for order in observation.service_board if order.get("status") == "ready_to_assemble"
+        item_id for item_id, stage in order_stages.items() if stage == "ready to assemble"
     }
-    prep_complete_orders = {
-        order["order_id"] for order in observation.service_board if order.get("status") == "prep_complete"
+    ready_to_cook_orders = {
+        item_id for item_id, stage in order_stages.items() if stage == "ready to cook"
     }
-    order = order_map.get(action.get("order_id", ""))
 
     score = {
         "SERVE_ORDER": 100.0,
@@ -115,34 +170,39 @@ def _heuristic_score(action: dict[str, Any], observation: Any) -> float:
         "PREP_COMPONENT": 55.0,
     }.get(action_type, 0.0)
 
-    if order is not None:
-        order_id = order["order_id"]
-        slack = int(order.get("slack_steps", 0))
-        score += max(0, 6 - slack) * 6.0
-        score += len(order.get("completed_components", [])) * 2.0
-        if action_type == "SERVE_ORDER" and order.get("status") == "ready_to_serve":
+    if order_id:
+        score += max(0, 6 - time_left.get(order_id, 99)) * 6.0
+        if order_id == context["urgent_order"]:
+            score += 15.0
+
+        stage = order_stages.get(order_id, "")
+        if action_type == "SERVE_ORDER" and stage == "ready to serve":
             score += 25.0
-        if action_type == "ASSEMBLE_DISH" and order.get("status") == "ready_to_assemble":
+        if action_type == "ASSEMBLE_DISH" and stage == "ready to assemble":
             score += 18.0
-        if action_type == "COOK_DISH" and order.get("status") in {"prep_complete", "ready_to_cook"}:
+        if action_type == "COOK_DISH" and stage == "ready to cook":
             score += 12.0
-        if action_type == "RESTOCK_INGREDIENT" and order.get("status") == "prep_complete":
-            score += 16.0
-        if action_type == "PREP_COMPONENT" and action.get("component_id") == order.get("next_component_id"):
+        if action_type == "PREP_COMPONENT" and stage in {"waiting to start", "in prep"}:
             score += 8.0
-        if order_id in active_prepared_orders:
-            score += 24.0
-            if action_type == "PREP_COMPONENT" and action.get("component_id") == order.get("next_component_id"):
-                score += 12.0
-        if order_id in prepared_expiry:
-            expiry_pressure = max(0, 4 - prepared_expiry[order_id]) * 10.0
-            score += expiry_pressure
+        if order_id in swapped_orders and action_type in {
+            "PREP_COMPONENT",
+            "COOK_DISH",
+            "ASSEMBLE_DISH",
+            "SERVE_ORDER",
+        }:
+            score += 6.0
+        if order_id in expiring_orders:
             if action_type in {"SERVE_ORDER", "ASSEMBLE_DISH", "COOK_DISH", "RESTOCK_INGREDIENT"}:
                 score += 16.0
             elif action_type == "PREP_COMPONENT":
                 score -= 8.0
-        elif active_prepared_orders and action_type == "PREP_COMPONENT":
-            score -= 20.0
+        if order_id in blocked_orders:
+            if action_type == "SUBSTITUTE_INGREDIENT":
+                score += 18.0
+            elif action_type == "RESTOCK_INGREDIENT":
+                score += 12.0
+            elif action_type == "PREP_COMPONENT":
+                score -= 18.0
 
     if ready_to_serve_orders and not (
         action_type == "SERVE_ORDER" and action.get("order_id", "") in ready_to_serve_orders
@@ -152,43 +212,17 @@ def _heuristic_score(action: dict[str, Any], observation: Any) -> float:
         action_type in {"ASSEMBLE_DISH", "SERVE_ORDER"} and action.get("order_id", "") in ready_to_assemble_orders
     ):
         score -= 18.0
-    elif prep_complete_orders and not (
-        action_type in {"COOK_DISH", "RESTOCK_INGREDIENT"} and action.get("order_id", "") in prep_complete_orders
+    elif ready_to_cook_orders and not (
+        action_type in {"COOK_DISH", "RESTOCK_INGREDIENT"} and action.get("order_id", "") in ready_to_cook_orders
     ):
         score -= 10.0
 
     if action_type == "SUBSTITUTE_INGREDIENT":
-        shortage = _find_shortage(order, action.get("ingredient_id", ""))
-        if shortage is not None:
-            score += 12.0
-            option = next(
-                (
-                    item
-                    for item in shortage.get("allowed_substitutes", [])
-                    if item.get("ingredient_id") == action.get("source_id", "")
-                ),
-                None,
-            )
-            if option is not None:
-                source_cost = float(inventory_map.get(action.get("source_id", ""), {}).get("unit_cost", 0.0))
-                target_cost = float(
-                    inventory_map.get(action.get("ingredient_id", ""), {}).get("unit_cost", 0.0)
-                )
-                score += max(0.0, target_cost - source_cost) * 40.0
-                score -= float(option.get("quality_penalty", 0.0)) * 100.0
+        score += 4.0
     elif action_type == "RESTOCK_INGREDIENT":
-        shortage = _find_shortage(order, action.get("ingredient_id", ""))
-        if shortage is not None:
-            unit_cost = float(
-                inventory_map.get(action.get("ingredient_id", ""), {}).get("unit_cost", 0.0)
-            )
-            score -= unit_cost * float(action.get("quantity", 0.0)) * 1.5
-            if shortage.get("allowed_substitutes"):
-                score -= 8.0
-        elif order is not None and order.get("status") == "prep_complete":
-            score += 10.0
-        else:
-            score -= 12.0
+        score -= float(action.get("quantity", 0.0) or 0.0) * 0.02
+        if action.get("source_id") == "rush_supplier":
+            score -= 2.0
 
     return score
 
@@ -197,9 +231,10 @@ def _heuristic_action(observation: Any) -> KitchenAction:
     available_actions = observation.available_actions
     if not available_actions:
         return KitchenAction(action_type="CHECK_PROGRESS")
+    context = _briefing_context(observation.briefing)
     ranked = sorted(
         available_actions,
-        key=lambda action: (-_heuristic_score(action, observation), _action_identity(action)),
+        key=lambda action: (-_heuristic_score(action, context), _action_identity(action)),
     )
     return _clean_action_payload(ranked[0])
 
@@ -207,50 +242,18 @@ def _heuristic_action(observation: Any) -> KitchenAction:
 def _llm_action(step: int, observation: Any, history: list[str]) -> KitchenAction | None:
     if client is None:
         return None
+    del step, history
 
     available_actions = observation.available_actions
     if not available_actions:
         return KitchenAction(action_type="CHECK_PROGRESS")
 
-    ranked = sorted(
-        available_actions,
-        key=lambda action: (-_heuristic_score(action, observation), _action_identity(action)),
+    system_prompt = (
+        "You are the kitchen operator. Read the briefing, choose one legal move, "
+        "and reply with JSON only using these keys: "
+        "action_type, order_id, component_id, ingredient_id, quantity, source_id, notes."
     )
-    shortlist = ranked[: min(3, len(ranked))]
-
-    system_prompt = textwrap.dedent(
-        """
-        You are controlling a restaurant kitchen in an OpenEnv benchmark.
-        Pick exactly one action from shortlist.
-        Prefer:
-        1. Serving ready orders before they go late.
-        2. The tightest deadline under real slack pressure.
-        3. Lower-cost recovery when a substitute preserves service.
-
-        Reply with JSON only:
-        {
-          "action_type": "...",
-          "order_id": "...",
-          "component_id": "...",
-          "ingredient_id": "...",
-          "quantity": 0.0,
-          "source_id": "...",
-          "notes": ""
-        }
-        """
-    ).strip()
-
-    user_prompt = textwrap.dedent(
-        f"""
-        Step: {step}
-        Scenario: {observation.scenario_id}
-        KPIs: {json.dumps(observation.kpis, ensure_ascii=True)}
-        Service board: {json.dumps(observation.service_board, ensure_ascii=True)}
-        Prepared components: {json.dumps(observation.prepared_components, ensure_ascii=True)}
-        Shortlist: {json.dumps(shortlist, ensure_ascii=True)}
-        Recent history: {history[-4:] if history else []}
-        """
-    ).strip()
+    user_prompt = observation.briefing or "Choose one legal action and reply with JSON only."
 
     try:
         response = client.chat.completions.create(
@@ -269,7 +272,7 @@ def _llm_action(step: int, observation: Any, history: list[str]) -> KitchenActio
         candidate = json.loads(content)
         chosen = _clean_action_payload(candidate)
         chosen_id = _action_identity(candidate)
-        if any(_action_identity(action) == chosen_id for action in shortlist):
+        if any(_action_identity(action) == chosen_id for action in available_actions):
             return chosen
     except Exception:
         return None
@@ -304,49 +307,62 @@ def fetch_tasks() -> list[str]:
 def run_task(task_id: str) -> tuple[bool, int, float, list[float]]:
     rewards: list[float] = []
     history: list[str] = []
+    step_count = 0
+    score = 0.0
+    success = False
+    result = None
 
-    with KitchenOpsEnv(base_url=ENV_URL).sync() as env:
-        result = env.reset(task_id=task_id)
-        step_count = 0
+    log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
 
-        while not result.done:
-            step_count += 1
-            action = choose_action(step_count, result.observation, history)
-            error = None
+    try:
+        with KitchenOpsEnv(base_url=ENV_URL).sync() as env:
+            result = env.reset(task_id=task_id)
+
+            while not result.done:
+                step_count += 1
+                action = choose_action(step_count, result.observation, history)
+                action_text = _format_action_for_log(action)
+                error = None
+
+                try:
+                    result = env.step(action)
+                except Exception as exc:
+                    error = str(exc)
+                    action = KitchenAction(action_type="CHECK_PROGRESS")
+                    action_text = _format_action_for_log(action)
+                    result = env.step(action)
+
+                reward = float(result.reward or 0.0)
+                rewards.append(reward)
+                history.append(
+                    f"step={step_count} action={action.action_type} reward={reward:.2f} task={task_id}"
+                )
+                log_step(
+                    step=step_count,
+                    action=action_text,
+                    reward=reward,
+                    done=result.done,
+                    error=error or result.observation.metadata.get("last_action_error"),
+                )
+
             try:
-                result = env.step(action)
-                reward = float(result.reward or 0.0)
-            except Exception as exc:
-                error = str(exc)
-                action = KitchenAction(action_type="CHECK_PROGRESS")
-                result = env.step(action)
-                reward = float(result.reward or 0.0)
+                grade = httpx.get(f"{ENV_URL}/grade", timeout=10.0).json()
+                score = float(grade.get("score", 0.0))
+            except Exception:
+                score = 0.0
+            success = score >= SUCCESS_SCORE_THRESHOLD
+    finally:
+        log_end(success=success, steps=step_count, score=score, rewards=rewards)
 
-            rewards.append(reward)
-            history.append(
-                f"step={step_count} action={action.action_type} reward={reward:.2f} task={task_id}"
-            )
-            log_step(
-                step=step_count,
-                action=action.action_type,
-                reward=reward,
-                done=result.done,
-                error=error or result.observation.metadata.get("last_error"),
-            )
-
-        grade = httpx.get(f"{ENV_URL}/grade", timeout=10.0).json()
-        score = float(grade.get("score", 0.0))
-        return score > 0.0, step_count, score, rewards
+    return success, step_count, score, rewards
 
 
 def main() -> None:
-    if USE_LLM_BASELINE and not HF_TOKEN:
-        print("ERROR: HF_TOKEN must be set when USE_LLM_BASELINE=1", file=sys.stderr)
+    if not HF_TOKEN:
+        print("ERROR: HF_TOKEN must be set", file=sys.stderr)
         sys.exit(1)
     for task_id in fetch_tasks():
-        log_start(task=task_id, env=ENV_NAME, model=MODEL_NAME)
-        success, steps, score, rewards = run_task(task_id)
-        log_end(success=success, steps=steps, score=score, rewards=rewards)
+        run_task(task_id)
 
 
 if __name__ == "__main__":

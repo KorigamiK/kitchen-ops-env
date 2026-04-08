@@ -27,14 +27,10 @@ class KitchenOpsEnv(EnvClient[KitchenAction, KitchenObservation, KitchenState]):
         obs_data = payload.get("observation", {})
         observation = KitchenObservation(
             scenario_id=obs_data.get("scenario_id", ""),
-            scenario_description=obs_data.get("scenario_description", ""),
             current_step=obs_data.get("current_step", 0),
             max_steps=obs_data.get("max_steps", 0),
-            service_board=obs_data.get("service_board", []),
-            inventory=obs_data.get("inventory", []),
-            prepared_components=obs_data.get("prepared_components", []),
+            briefing=obs_data.get("briefing", ""),
             available_actions=obs_data.get("available_actions", []),
-            kpis=obs_data.get("kpis", {}),
             done=payload.get("done", False),
             reward=payload.get("reward"),
             metadata=obs_data.get("metadata", {}),
@@ -55,7 +51,6 @@ class KitchenOpsEnv(EnvClient[KitchenAction, KitchenObservation, KitchenState]):
             inventory=payload.get("inventory", {}),
             orders=payload.get("orders", {}),
             prepared_components=payload.get("prepared_components", []),
-            kpis=payload.get("kpis", {}),
+            kitchen_status=payload.get("kitchen_status", {}),
             score_components=payload.get("score_components", {}),
         )
-
