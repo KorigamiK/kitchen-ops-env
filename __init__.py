@@ -1,5 +1,6 @@
-"""Compatibility exports for OpenEnv tooling."""
+"""Root package exports for OpenEnv tooling and local imports."""
 
-from kitchen_ops_env import KitchenAction, KitchenObservation, KitchenOpsEnv, KitchenState
+from .client import KitchenOpsEnv
+from .models import KitchenAction, KitchenObservation, KitchenState
 
 __all__ = ["KitchenOpsEnv", "KitchenAction", "KitchenObservation", "KitchenState"]
