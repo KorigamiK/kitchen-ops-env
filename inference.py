@@ -14,15 +14,15 @@ from openai import OpenAI
 
 from kitchen_ops_env import KitchenAction, KitchenOpsEnv
 
-API_BASE_URL = os.getenv("API_BASE_URL")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://models.github.ai/inference")
 MODEL_NAME = os.getenv("MODEL_NAME", "openai/gpt-4o")
 HF_TOKEN = os.getenv("HF_TOKEN")
 ENV_URL = os.getenv("KITCHEN_ENV_URL", "http://localhost:8000")
 TASKS = ["breakfast_omelette", "lunch_combo", "dinner_rush_stockout"]
 ENV_NAME = "kitchen_ops_env"
 
-if not API_BASE_URL or not HF_TOKEN:
-    print("ERROR: API_BASE_URL and HF_TOKEN must be set", file=sys.stderr)
+if not HF_TOKEN:
+    print("ERROR: HF_TOKEN must be set", file=sys.stderr)
     sys.exit(1)
 
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
@@ -186,4 +186,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
