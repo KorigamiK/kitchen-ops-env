@@ -1,1 +1,1 @@
-"""OpenEnv validator compatibility wrapper package."""
+"""Top-level server package for OpenEnv."""
