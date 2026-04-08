@@ -29,8 +29,8 @@ def create_kitchen_app() -> FastAPI:
         env_name="kitchen_ops_env",
     )
 
-    @app.get("/", response_class=HTMLResponse)
-    def landing_page() -> HTMLResponse | RedirectResponse:
+    @app.get("/", response_class=HTMLResponse, response_model=None)
+    def landing_page():
         if os.getenv("ENABLE_WEB_INTERFACE", "false").lower() in ("true", "1", "yes"):
             return RedirectResponse(url="/web/")
         env = get_env()
