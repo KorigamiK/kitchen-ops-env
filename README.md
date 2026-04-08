@@ -1,6 +1,10 @@
 ---
 title: Kitchen Ops Env
+emoji: 👁
+colorFrom: yellow
+colorTo: pink
 sdk: docker
+pinned: false
 app_port: 8000
 tags:
   - openenv
