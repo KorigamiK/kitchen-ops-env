@@ -38,6 +38,39 @@ def _env_endpoint(path: str) -> str:
     return f"{ENV_URL}/{path.lstrip('/')}"
 
 
+def _score_from_components(task_id: str, components: dict[str, float]) -> float:
+    if task_id == "breakfast_omelette":
+        score = (
+            0.45 * components.get("completion_ratio", 0.0)
+            + 0.25 * components.get("on_time_ratio", 0.0)
+            + 0.15 * components.get("execution_accuracy", 0.0)
+            + 0.10 * components.get("waste_efficiency", 0.0)
+            + 0.05 * components.get("lateness_efficiency", 0.0)
+        )
+    elif task_id == "lunch_combo":
+        score = (
+            0.30 * components.get("completion_ratio", 0.0)
+            + 0.20 * components.get("on_time_ratio", 0.0)
+            + 0.15 * components.get("production_progress", 0.0)
+            + 0.10 * components.get("cost_efficiency", 0.0)
+            + 0.10 * components.get("waste_efficiency", 0.0)
+            + 0.10 * components.get("execution_accuracy", 0.0)
+            + 0.05 * components.get("lateness_efficiency", 0.0)
+        )
+    else:
+        score = (
+            0.25 * components.get("completion_ratio", 0.0)
+            + 0.15 * components.get("on_time_ratio", 0.0)
+            + 0.15 * components.get("production_progress", 0.0)
+            + 0.15 * components.get("substitution_quality", 0.0)
+            + 0.10 * components.get("cost_efficiency", 0.0)
+            + 0.10 * components.get("waste_efficiency", 0.0)
+            + 0.05 * components.get("execution_accuracy", 0.0)
+            + 0.05 * components.get("lateness_efficiency", 0.0)
+        )
+    return max(0.0, min(round(score, 3), 1.0))
+
+
 def _get_client() -> Any | None:
     global client, _client_initialized
     if _client_initialized:
@@ -384,10 +417,14 @@ def run_task(task_id: str) -> tuple[bool, int, float, list[float]]:
                 )
 
             try:
-                grade = _get_json(_env_endpoint("/grade"), timeout=10.0)
-                score = float(grade.get("score", 0.0))
+                state = env.state()
+                score = _score_from_components(task_id, state.score_components)
             except Exception:
-                score = 0.0
+                try:
+                    grade = _get_json(_env_endpoint("/grade"), timeout=10.0)
+                    score = float(grade.get("score", 0.0))
+                except Exception:
+                    score = 0.0
             success = score >= SUCCESS_SCORE_THRESHOLD
     finally:
         log_end(success=success, steps=step_count, score=score, rewards=rewards)
