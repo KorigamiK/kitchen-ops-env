@@ -8,11 +8,9 @@ import os
 import re
 import sys
 from typing import Any
+from urllib import request
 
-import httpx
-from openai import OpenAI
-
-from kitchen_ops_env import KitchenAction, KitchenOpsEnv
+from kitchen_ops_env import KitchenAction
 
 HF_TOKEN = os.getenv("HF_TOKEN")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://models.github.ai/inference")
@@ -21,7 +19,35 @@ BENCHMARK = "kitchen_ops_env"
 ENV_URL = os.getenv("KITCHEN_ENV_URL", "http://localhost:8000")
 SUCCESS_SCORE_THRESHOLD = 0.1
 
-client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN) if HF_TOKEN else None
+client: Any | None = None
+_client_initialized = False
+
+
+def _get_json(url: str, timeout: float = 10.0) -> dict[str, Any]:
+    with request.urlopen(url, timeout=timeout) as response:
+        payload = response.read().decode("utf-8")
+    data = json.loads(payload)
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected object response from {url}")
+    return data
+
+
+def _get_client() -> Any | None:
+    global client, _client_initialized
+    if _client_initialized:
+        return client
+
+    _client_initialized = True
+    if not HF_TOKEN:
+        return None
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return None
+
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+    return client
 
 
 def log_start(task: str, env: str, model: str) -> None:
@@ -240,7 +266,8 @@ def _heuristic_action(observation: Any) -> KitchenAction:
 
 
 def _llm_action(step: int, observation: Any, history: list[str]) -> KitchenAction | None:
-    if client is None:
+    llm_client = _get_client()
+    if llm_client is None:
         return None
     del step, history
 
@@ -256,7 +283,7 @@ def _llm_action(step: int, observation: Any, history: list[str]) -> KitchenActio
     user_prompt = observation.briefing or "Choose one legal action and reply with JSON only."
 
     try:
-        response = client.chat.completions.create(
+        response = llm_client.chat.completions.create(
             model=MODEL_NAME,
             temperature=0.0,
             messages=[
@@ -287,9 +314,7 @@ def choose_action(step: int, observation: Any, history: list[str]) -> KitchenAct
 
 def fetch_tasks() -> list[str]:
     try:
-        response = httpx.get(f"{ENV_URL}/tasks", timeout=10.0)
-        response.raise_for_status()
-        tasks = response.json().get("tasks", [])
+        tasks = _get_json(f"{ENV_URL}/tasks", timeout=10.0).get("tasks", [])
         if tasks:
             return [str(task) for task in tasks]
     except Exception:
@@ -305,6 +330,13 @@ def fetch_tasks() -> list[str]:
 
 
 def run_task(task_id: str) -> tuple[bool, int, float, list[float]]:
+    try:
+        from kitchen_ops_env import KitchenOpsEnv
+    except ImportError as exc:
+        raise RuntimeError(
+            "KitchenOpsEnv runtime dependencies are not installed; install the project requirements to run benchmark tasks"
+        ) from exc
+
     rewards: list[float] = []
     history: list[str] = []
     step_count = 0
@@ -346,7 +378,7 @@ def run_task(task_id: str) -> tuple[bool, int, float, list[float]]:
                 )
 
             try:
-                grade = httpx.get(f"{ENV_URL}/grade", timeout=10.0).json()
+                grade = _get_json(f"{ENV_URL}/grade", timeout=10.0)
                 score = float(grade.get("score", 0.0))
             except Exception:
                 score = 0.0
@@ -360,6 +392,12 @@ def run_task(task_id: str) -> tuple[bool, int, float, list[float]]:
 def main() -> None:
     if not HF_TOKEN:
         print("ERROR: HF_TOKEN must be set", file=sys.stderr)
+        sys.exit(1)
+    if _get_client() is None:
+        print(
+            "ERROR: openai dependencies are not installed; install the project requirements to enable model inference",
+            file=sys.stderr,
+        )
         sys.exit(1)
     for task_id in fetch_tasks():
         run_task(task_id)
