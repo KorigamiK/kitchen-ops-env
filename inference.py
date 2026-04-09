@@ -12,7 +12,7 @@ from urllib import request
 
 from kitchen_ops_env import KitchenAction
 
-HF_TOKEN = os.getenv("HF_TOKEN")
+HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://models.github.ai/inference")
 MODEL_NAME = os.getenv("MODEL_NAME", "openai/gpt-4o")
 BENCHMARK = "kitchen_ops_env"
@@ -391,7 +391,7 @@ def run_task(task_id: str) -> tuple[bool, int, float, list[float]]:
 
 def main() -> None:
     if not HF_TOKEN:
-        print("ERROR: HF_TOKEN must be set", file=sys.stderr)
+        print("ERROR: HF_TOKEN or API_KEY must be set", file=sys.stderr)
         sys.exit(1)
     if _get_client() is None:
         print(
