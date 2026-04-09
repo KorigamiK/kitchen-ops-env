@@ -7,10 +7,22 @@ import json
 import os
 import re
 import sys
+from dataclasses import dataclass, field
 from typing import Any
 from urllib import request
 
-from kitchen_ops_env import KitchenAction
+
+@dataclass(slots=True)
+class KitchenAction:
+    action_type: str
+    order_id: str = ""
+    component_id: str = ""
+    ingredient_id: str = ""
+    quantity: float = 0.0
+    source_id: str = ""
+    notes: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
 
 HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://models.github.ai/inference")
@@ -103,7 +115,9 @@ def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
-def log_step(step: int, action: str, reward: float, done: bool, error: str | None) -> None:
+def log_step(
+    step: int, action: str, reward: float, done: bool, error: str | None
+) -> None:
     error_val = error if error else "null"
     done_val = str(done).lower()
     print(
@@ -230,7 +244,9 @@ def _heuristic_score(action: dict[str, Any], context: dict[str, Any]) -> float:
         item_id for item_id, stage in order_stages.items() if stage == "ready to serve"
     }
     ready_to_assemble_orders = {
-        item_id for item_id, stage in order_stages.items() if stage == "ready to assemble"
+        item_id
+        for item_id, stage in order_stages.items()
+        if stage == "ready to assemble"
     }
     ready_to_cook_orders = {
         item_id for item_id, stage in order_stages.items() if stage == "ready to cook"
@@ -267,7 +283,12 @@ def _heuristic_score(action: dict[str, Any], context: dict[str, Any]) -> float:
         }:
             score += 6.0
         if order_id in expiring_orders:
-            if action_type in {"SERVE_ORDER", "ASSEMBLE_DISH", "COOK_DISH", "RESTOCK_INGREDIENT"}:
+            if action_type in {
+                "SERVE_ORDER",
+                "ASSEMBLE_DISH",
+                "COOK_DISH",
+                "RESTOCK_INGREDIENT",
+            }:
                 score += 16.0
             elif action_type == "PREP_COMPONENT":
                 score -= 8.0
@@ -280,15 +301,18 @@ def _heuristic_score(action: dict[str, Any], context: dict[str, Any]) -> float:
                 score -= 18.0
 
     if ready_to_serve_orders and not (
-        action_type == "SERVE_ORDER" and action.get("order_id", "") in ready_to_serve_orders
+        action_type == "SERVE_ORDER"
+        and action.get("order_id", "") in ready_to_serve_orders
     ):
         score -= 35.0
     elif ready_to_assemble_orders and not (
-        action_type in {"ASSEMBLE_DISH", "SERVE_ORDER"} and action.get("order_id", "") in ready_to_assemble_orders
+        action_type in {"ASSEMBLE_DISH", "SERVE_ORDER"}
+        and action.get("order_id", "") in ready_to_assemble_orders
     ):
         score -= 18.0
     elif ready_to_cook_orders and not (
-        action_type in {"COOK_DISH", "RESTOCK_INGREDIENT"} and action.get("order_id", "") in ready_to_cook_orders
+        action_type in {"COOK_DISH", "RESTOCK_INGREDIENT"}
+        and action.get("order_id", "") in ready_to_cook_orders
     ):
         score -= 10.0
 
@@ -309,12 +333,17 @@ def _heuristic_action(observation: Any) -> KitchenAction:
     context = _briefing_context(observation.briefing)
     ranked = sorted(
         available_actions,
-        key=lambda action: (-_heuristic_score(action, context), _action_identity(action)),
+        key=lambda action: (
+            -_heuristic_score(action, context),
+            _action_identity(action),
+        ),
     )
     return _clean_action_payload(ranked[0])
 
 
-def _llm_action(step: int, observation: Any, history: list[str]) -> KitchenAction | None:
+def _llm_action(
+    step: int, observation: Any, history: list[str]
+) -> KitchenAction | None:
     llm_client = _get_client()
     if llm_client is None:
         return None
@@ -329,7 +358,9 @@ def _llm_action(step: int, observation: Any, history: list[str]) -> KitchenActio
         "and reply with JSON only using these keys: "
         "action_type, order_id, component_id, ingredient_id, quantity, source_id, notes."
     )
-    user_prompt = observation.briefing or "Choose one legal action and reply with JSON only."
+    user_prompt = (
+        observation.briefing or "Choose one legal action and reply with JSON only."
+    )
 
     try:
         response = llm_client.chat.completions.create(
