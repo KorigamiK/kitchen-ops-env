@@ -16,7 +16,9 @@ HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://models.github.ai/inference")
 MODEL_NAME = os.getenv("MODEL_NAME", "openai/gpt-4o")
 BENCHMARK = "kitchen_ops_env"
-ENV_URL = os.getenv("KITCHEN_ENV_URL", "http://localhost:8000")
+ENV_URL = (
+    os.getenv("ENV_URL") or os.getenv("KITCHEN_ENV_URL", "http://localhost:8000")
+).rstrip("/")
 SUCCESS_SCORE_THRESHOLD = 0.1
 
 client: Any | None = None
@@ -30,6 +32,10 @@ def _get_json(url: str, timeout: float = 10.0) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"Expected object response from {url}")
     return data
+
+
+def _env_endpoint(path: str) -> str:
+    return f"{ENV_URL}/{path.lstrip('/')}"
 
 
 def _get_client() -> Any | None:
@@ -314,7 +320,7 @@ def choose_action(step: int, observation: Any, history: list[str]) -> KitchenAct
 
 def fetch_tasks() -> list[str]:
     try:
-        tasks = _get_json(f"{ENV_URL}/tasks", timeout=10.0).get("tasks", [])
+        tasks = _get_json(_env_endpoint("/tasks"), timeout=10.0).get("tasks", [])
         if tasks:
             return [str(task) for task in tasks]
     except Exception:
@@ -378,7 +384,7 @@ def run_task(task_id: str) -> tuple[bool, int, float, list[float]]:
                 )
 
             try:
-                grade = _get_json(f"{ENV_URL}/grade", timeout=10.0)
+                grade = _get_json(_env_endpoint("/grade"), timeout=10.0)
                 score = float(grade.get("score", 0.0))
             except Exception:
                 score = 0.0
