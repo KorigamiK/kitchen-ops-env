@@ -7,10 +7,11 @@ import json
 import os
 import re
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib import request
 
-from kitchen_ops_env import KitchenAction
+if TYPE_CHECKING:
+    from kitchen_ops_env.models import KitchenAction
 
 HF_TOKEN = os.getenv("HF_TOKEN")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://models.github.ai/inference")
@@ -50,6 +51,12 @@ def _get_client() -> Any | None:
     return client
 
 
+def _kitchen_action_cls() -> type[KitchenAction]:
+    from kitchen_ops_env.models import KitchenAction
+
+    return KitchenAction
+
+
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
@@ -72,7 +79,8 @@ def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> No
 
 
 def _clean_action_payload(candidate: dict[str, Any]) -> KitchenAction:
-    return KitchenAction(
+    kitchen_action = _kitchen_action_cls()
+    return kitchen_action(
         action_type=candidate.get("action_type", "CHECK_PROGRESS"),
         order_id=candidate.get("order_id", ""),
         component_id=candidate.get("component_id", ""),
@@ -256,7 +264,7 @@ def _heuristic_score(action: dict[str, Any], context: dict[str, Any]) -> float:
 def _heuristic_action(observation: Any) -> KitchenAction:
     available_actions = observation.available_actions
     if not available_actions:
-        return KitchenAction(action_type="CHECK_PROGRESS")
+        return _kitchen_action_cls()(action_type="CHECK_PROGRESS")
     context = _briefing_context(observation.briefing)
     ranked = sorted(
         available_actions,
@@ -273,7 +281,7 @@ def _llm_action(step: int, observation: Any, history: list[str]) -> KitchenActio
 
     available_actions = observation.available_actions
     if not available_actions:
-        return KitchenAction(action_type="CHECK_PROGRESS")
+        return _kitchen_action_cls()(action_type="CHECK_PROGRESS")
 
     system_prompt = (
         "You are the kitchen operator. Read the briefing, choose one legal move, "
@@ -331,7 +339,7 @@ def fetch_tasks() -> list[str]:
 
 def run_task(task_id: str) -> tuple[bool, int, float, list[float]]:
     try:
-        from kitchen_ops_env import KitchenOpsEnv
+        from kitchen_ops_env.client import KitchenOpsEnv
     except ImportError as exc:
         raise RuntimeError(
             "KitchenOpsEnv runtime dependencies are not installed; install the project requirements to run benchmark tasks"
@@ -360,7 +368,7 @@ def run_task(task_id: str) -> tuple[bool, int, float, list[float]]:
                     result = env.step(action)
                 except Exception as exc:
                     error = str(exc)
-                    action = KitchenAction(action_type="CHECK_PROGRESS")
+                    action = _kitchen_action_cls()(action_type="CHECK_PROGRESS")
                     action_text = _format_action_for_log(action)
                     result = env.step(action)
 
