@@ -71,6 +71,16 @@ def _score_from_components(task_id: str, components: dict[str, float]) -> float:
     return max(0.0, min(round(score, 3), 1.0))
 
 
+def _score_from_state(task_id: str, env: Any) -> float:
+    state = env.state()
+    components = state.score_components
+    if not components:
+        raise RuntimeError(
+            f"Environment state did not include score components for task '{task_id}'"
+        )
+    return _score_from_components(task_id, components)
+
+
 def _get_client() -> Any | None:
     global client, _client_initialized
     if _client_initialized:
@@ -416,15 +426,7 @@ def run_task(task_id: str) -> tuple[bool, int, float, list[float]]:
                     error=error or result.observation.metadata.get("last_action_error"),
                 )
 
-            try:
-                state = env.state()
-                score = _score_from_components(task_id, state.score_components)
-            except Exception:
-                try:
-                    grade = _get_json(_env_endpoint("/grade"), timeout=10.0)
-                    score = float(grade.get("score", 0.0))
-                except Exception:
-                    score = 0.0
+            score = _score_from_state(task_id, env)
             success = score >= SUCCESS_SCORE_THRESHOLD
     finally:
         log_end(success=success, steps=step_count, score=score, rewards=rewards)

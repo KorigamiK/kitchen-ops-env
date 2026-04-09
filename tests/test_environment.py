@@ -1,4 +1,4 @@
-from inference import choose_action
+from inference import _score_from_components, choose_action
 from kitchen_ops_env.models import KitchenAction
 from kitchen_ops_env.scenario_generator import TASK_IDS
 from kitchen_ops_env.server.kitchen_environment import KitchenOpsEnvironment
@@ -108,3 +108,21 @@ def test_deterministic_baseline_clears_generated_tasks() -> None:
             )
 
         assert env.grade_episode() >= 0.7
+
+
+def test_inference_scoring_matches_environment_grader() -> None:
+    for task_id in TASK_IDS:
+        env = KitchenOpsEnvironment()
+        obs = env.reset(task_id=task_id)
+        history: list[str] = []
+        step = 0
+
+        while not obs.done:
+            step += 1
+            action = choose_action(step, obs, history)
+            obs = env.step(action)
+            history.append(
+                f"step={step} action={action.action_type} reward={obs.reward:.2f} task={task_id}"
+            )
+
+        assert _score_from_components(task_id, env.state.score_components) == env.grade_episode()
