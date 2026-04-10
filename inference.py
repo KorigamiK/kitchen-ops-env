@@ -29,7 +29,7 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://models.github.ai/inference")
 MODEL_NAME = os.getenv("MODEL_NAME", "openai/gpt-4o")
 BENCHMARK = "kitchen_ops_env"
 ENV_URL = (
-    os.getenv("ENV_URL") or os.getenv("KITCHEN_ENV_URL", "http://localhost:8000")
+    os.getenv("ENV_URL") or os.getenv("KITCHEN_ENV_URL", "https://korigamik-kitchen-ops-env.hf.space")
 ).rstrip("/")
 SUCCESS_SCORE_THRESHOLD = 0.1
 
