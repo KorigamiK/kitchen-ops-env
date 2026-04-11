@@ -80,7 +80,7 @@ def _score_from_components(task_id: str, components: dict[str, float]) -> float:
             + 0.05 * components.get("execution_accuracy", 0.0)
             + 0.05 * components.get("lateness_efficiency", 0.0)
         )
-    return max(0.0, min(round(score, 3), 1.0))
+    return max(0.001, min(round(score, 3), 0.999))
 
 
 def _score_from_state(task_id: str, env: Any) -> float:
